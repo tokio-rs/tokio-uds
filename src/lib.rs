@@ -11,8 +11,7 @@
 #![deny(missing_docs)]
 
 extern crate futures;
-extern crate futures_io;
-extern crate futures_mio;
+extern crate tokio_core;
 extern crate mio_uds;
 #[macro_use]
 extern crate log;
@@ -25,10 +24,10 @@ use std::os::unix::net::SocketAddr;
 use std::os::unix::prelude::*;
 use std::path::Path;
 
-use futures::stream::Stream;
 use futures::{Future, Poll};
-use futures_io::{IoFuture, IoStream};
-use futures_mio::{ReadinessStream, LoopHandle};
+use futures::stream::Stream;
+use tokio_core::{ReadinessStream, LoopHandle};
+use tokio_core::io::{IoFuture, IoStream};
 
 /// A Unix socket which can accept connections from other unix sockets.
 pub struct UnixListener {

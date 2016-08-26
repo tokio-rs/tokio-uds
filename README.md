@@ -1,14 +1,10 @@
-# futures-uds
+# tokio-uds
 
-An implementation of an asynchronous HTTP client using futures backed by
-libuds.
+An implementation of Unix Domain Sockets for Tokio
 
-[![Build Status](https://travis-ci.org/alexcrichton/futures-rs.svg?branch=master)](https://travis-ci.org/alexcrichton/futures-rs)
+[![Build Status](https://travis-ci.org/tokio-rs/tokio-uds.svg?branch=master)](https://travis-ci.org/tokio-rs/tokio-uds)
 
-[Documentation](http://alexcrichton.com/futures-rs/futures_uds)
-
-> **Note**: this library does not currently work on Windows, but support is
-> planned soon!
+[Documentation](https://tokio-rs.github.io/tokio-uds)
 
 ## Usage
 
@@ -16,18 +12,18 @@ First, add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-futures-uds = { git = "https://github.com/alexcrichton/futures-rs" }
+tokio-uds = { git = "https://github.com/tokio-rs/tokio-uds" }
 ```
 
 Next, add this to your crate:
 
 ```rust
-extern crate futures_uds;
+extern crate tokio_uds;
 ```
 
 # License
 
-`futures-uds` is primarily distributed under the terms of both the MIT
+`tokio-uds` is primarily distributed under the terms of both the MIT
 license and the Apache License (Version 2.0), with portions covered by various
 BSD-like licenses.
 
