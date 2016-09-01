@@ -12,6 +12,7 @@
 
 extern crate futures;
 extern crate tokio_core;
+extern crate mio;
 extern crate mio_uds;
 #[macro_use]
 extern crate log;
@@ -81,6 +82,10 @@ impl UnixListener {
             type Error = io::Error;
 
             fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
+                match self.inner.io.poll_read() {
+                    Poll::Ok(()) => {}
+                    _ => return Poll::NotReady,
+                }
                 match self.inner.io.get_ref().accept() {
                     Ok(Some(pair)) => {
                         Poll::Ok(Some(pair))
@@ -238,34 +243,26 @@ impl Future for UnixStreamNew {
 
 impl Read for UnixStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let r = self.io.get_ref().read(buf);
-        if is_wouldblock(&r) {
-            self.io.need_read();
-        }
-        return r
+        <&UnixStream>::read(&mut &*self, buf)
     }
 }
 
 impl Write for UnixStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let r = self.io.get_ref().write(buf);
-        if is_wouldblock(&r) {
-            self.io.need_write();
-        }
-        return r
+        <&UnixStream>::write(&mut &*self, buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let r = self.io.get_ref().flush();
-        if is_wouldblock(&r) {
-            self.io.need_write();
-        }
-        return r
+        <&UnixStream>::flush(&mut &*self)
     }
 }
 
 impl<'a> Read for &'a UnixStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self.io.poll_read() {
+            Poll::Ok(()) => {}
+            _ => return Err(mio::would_block()),
+        }
         let r = self.io.get_ref().read(buf);
         if is_wouldblock(&r) {
             self.io.need_read();
@@ -276,6 +273,10 @@ impl<'a> Read for &'a UnixStream {
 
 impl<'a> Write for &'a UnixStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self.io.poll_write() {
+            Poll::Ok(()) => {}
+            _ => return Err(mio::would_block()),
+        }
         let r = self.io.get_ref().write(buf);
         if is_wouldblock(&r) {
             self.io.need_write();
@@ -284,6 +285,10 @@ impl<'a> Write for &'a UnixStream {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        match self.io.poll_write() {
+            Poll::Ok(()) => {}
+            _ => return Err(mio::would_block()),
+        }
         let r = self.io.get_ref().flush();
         if is_wouldblock(&r) {
             self.io.need_write();
@@ -383,6 +388,10 @@ impl UnixDatagram {
     /// On success, returns the number of bytes read and the address from
     /// whence the data came.
     pub fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        match self.io.poll_read() {
+            Poll::Ok(()) => {}
+            _ => return Err(mio::would_block()),
+        }
         let r = self.io.get_ref().recv_from(buf);
         if is_wouldblock(&r) {
             self.io.need_read();
@@ -394,6 +403,10 @@ impl UnixDatagram {
     ///
     /// On success, returns the number of bytes read.
     pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
+        match self.io.poll_read() {
+            Poll::Ok(()) => {}
+            _ => return Err(mio::would_block()),
+        }
         let r = self.io.get_ref().recv(buf);
         if is_wouldblock(&r) {
             self.io.need_read();
@@ -407,6 +420,10 @@ impl UnixDatagram {
     pub fn send_to<P>(&self, buf: &[u8], path: P) -> io::Result<usize>
         where P: AsRef<Path>
     {
+        match self.io.poll_write() {
+            Poll::Ok(()) => {}
+            _ => return Err(mio::would_block()),
+        }
         let r = self.io.get_ref().send_to(buf, path);
         if is_wouldblock(&r) {
             self.io.need_write();
@@ -421,6 +438,10 @@ impl UnixDatagram {
     ///
     /// On success, returns the number of bytes written.
     pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
+        match self.io.poll_write() {
+            Poll::Ok(()) => {}
+            _ => return Err(mio::would_block()),
+        }
         let r = self.io.get_ref().send(buf);
         if is_wouldblock(&r) {
             self.io.need_write();

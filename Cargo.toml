@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Alex Crichton <alex@alexcrichton.com>"]
 
 [dependencies]
+mio = { git = "https://github.com/carllerche/mio" }
 mio-uds = { git = "https://github.com/alexcrichton/mio-uds" }
 futures = { git = "https://github.com/alexcrichton/futures-rs" }
 tokio-core = { git = "https://github.com/tokio-rs/tokio-core" }
