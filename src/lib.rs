@@ -10,6 +10,7 @@
 #![cfg(unix)]
 #![deny(missing_docs)]
 
+#[macro_use]
 extern crate futures;
 extern crate tokio_core;
 extern crate mio;
@@ -18,14 +19,14 @@ extern crate mio_uds;
 extern crate log;
 
 use std::fmt;
-use std::io::{self, ErrorKind, Read, Write};
+use std::io::{self, Read, Write};
 use std::mem;
 use std::net::Shutdown;
 use std::os::unix::net::SocketAddr;
 use std::os::unix::prelude::*;
 use std::path::Path;
 
-use futures::{Future, Poll};
+use futures::{Future, Poll, Async};
 use futures::stream::Stream;
 use tokio_core::{ReadinessStream, LoopHandle};
 use tokio_core::io::{IoFuture, IoStream};
@@ -82,19 +83,15 @@ impl UnixListener {
             type Error = io::Error;
 
             fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
-                match self.inner.io.poll_read() {
-                    Poll::Ok(()) => {}
-                    _ => return Poll::NotReady,
-                }
-                match self.inner.io.get_ref().accept() {
-                    Ok(Some(pair)) => {
-                        Poll::Ok(Some(pair))
+                try_ready!(self.inner.io.poll_read());
+                match try!(self.inner.io.get_ref().accept()) {
+                    Some(pair) => {
+                        Ok(Some(pair).into())
                     }
-                    Ok(None) => {
+                    None => {
                         self.inner.io.need_read();
-                        Poll::NotReady
+                        Ok(Async::NotReady)
                     }
-                    Err(e) => Poll::Err(e),
                 }
             }
         }
@@ -220,24 +217,20 @@ impl Future for UnixStreamNew {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<UnixStream, io::Error> {
-        let stream = match mem::replace(self, UnixStreamNew::Empty) {
-            UnixStreamNew::Waiting(s) => s,
-            UnixStreamNew::Empty => panic!("can't poll Unix stream twice"),
-        };
-        match stream.io.poll_write() {
-            Poll::Ok(()) => {
-                match stream.io.get_ref().take_error() {
-                    Ok(None) => return Poll::Ok(stream),
-                    Ok(Some(e)) => return Poll::Err(e),
-                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
-                    Err(e) => return Poll::Err(e),
-                }
+        {
+            let stream = match *self {
+                UnixStreamNew::Waiting(ref s) => s,
+                UnixStreamNew::Empty => panic!("can't poll Unix stream twice"),
+            };
+            try_ready!(stream.io.poll_write());
+            if let Some(e) = try!(stream.io.get_ref().take_error()) {
+                return Err(e)
             }
-            Poll::Err(e) => return Poll::Err(e),
-            Poll::NotReady => {}
         }
-        *self = UnixStreamNew::Waiting(stream);
-        Poll::NotReady
+        match mem::replace(self, UnixStreamNew::Empty) {
+            UnixStreamNew::Waiting(s) => Ok(s.into()),
+            UnixStreamNew::Empty => panic!(),
+        }
     }
 }
 
@@ -259,9 +252,8 @@ impl Write for UnixStream {
 
 impl<'a> Read for &'a UnixStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self.io.poll_read() {
-            Poll::Ok(()) => {}
-            _ => return Err(mio::would_block()),
+        if let Async::NotReady = try!(self.io.poll_read()) {
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().read(buf);
         if is_wouldblock(&r) {
@@ -273,9 +265,8 @@ impl<'a> Read for &'a UnixStream {
 
 impl<'a> Write for &'a UnixStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self.io.poll_write() {
-            Poll::Ok(()) => {}
-            _ => return Err(mio::would_block()),
+        if let Async::NotReady = try!(self.io.poll_write()) {
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().write(buf);
         if is_wouldblock(&r) {
@@ -285,9 +276,8 @@ impl<'a> Write for &'a UnixStream {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        match self.io.poll_write() {
-            Poll::Ok(()) => {}
-            _ => return Err(mio::would_block()),
+        if let Async::NotReady = try!(self.io.poll_write()) {
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().flush();
         if is_wouldblock(&r) {
@@ -388,9 +378,8 @@ impl UnixDatagram {
     /// On success, returns the number of bytes read and the address from
     /// whence the data came.
     pub fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-        match self.io.poll_read() {
-            Poll::Ok(()) => {}
-            _ => return Err(mio::would_block()),
+        if let Async::NotReady = try!(self.io.poll_read()) {
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().recv_from(buf);
         if is_wouldblock(&r) {
@@ -403,9 +392,8 @@ impl UnixDatagram {
     ///
     /// On success, returns the number of bytes read.
     pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
-        match self.io.poll_read() {
-            Poll::Ok(()) => {}
-            _ => return Err(mio::would_block()),
+        if let Async::NotReady = try!(self.io.poll_read()) {
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().recv(buf);
         if is_wouldblock(&r) {
@@ -420,9 +408,8 @@ impl UnixDatagram {
     pub fn send_to<P>(&self, buf: &[u8], path: P) -> io::Result<usize>
         where P: AsRef<Path>
     {
-        match self.io.poll_write() {
-            Poll::Ok(()) => {}
-            _ => return Err(mio::would_block()),
+        if let Async::NotReady = try!(self.io.poll_write()) {
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().send_to(buf, path);
         if is_wouldblock(&r) {
@@ -438,9 +425,8 @@ impl UnixDatagram {
     ///
     /// On success, returns the number of bytes written.
     pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
-        match self.io.poll_write() {
-            Poll::Ok(()) => {}
-            _ => return Err(mio::would_block()),
+        if let Async::NotReady = try!(self.io.poll_write()) {
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().send(buf);
         if is_wouldblock(&r) {
