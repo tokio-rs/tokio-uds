@@ -20,7 +20,6 @@ extern crate log;
 
 use std::fmt;
 use std::io::{self, Read, Write};
-use std::mem;
 use std::net::Shutdown;
 use std::os::unix::net::SocketAddr;
 use std::os::unix::prelude::*;
@@ -28,39 +27,41 @@ use std::path::Path;
 
 use futures::{Future, Poll, Async};
 use futures::stream::Stream;
-use tokio_core::{ReadinessStream, LoopHandle};
-use tokio_core::io::{IoFuture, IoStream};
+use tokio_core::reactor::{PollEvented, Handle};
+use tokio_core::io::{Io, IoStream};
 
 /// A Unix socket which can accept connections from other unix sockets.
 pub struct UnixListener {
-    io: ReadinessStream<mio_uds::UnixListener>,
+    io: PollEvented<mio_uds::UnixListener>,
 }
 
 impl UnixListener {
     /// Creates a new `UnixListener` bound to the specified path.
-    pub fn bind<P>(path: P, handle: LoopHandle) -> IoFuture<UnixListener>
+    pub fn bind<P>(path: P, handle: &Handle) -> io::Result<UnixListener>
         where P: AsRef<Path>
     {
         UnixListener::_bind(path.as_ref(), handle)
     }
 
-    fn _bind(path: &Path, handle: LoopHandle) -> IoFuture<UnixListener> {
-        match mio_uds::UnixListener::bind(path) {
-            Ok(s) => UnixListener::new(s, handle),
-            Err(e) => futures::failed(e).boxed(),
-        }
+    fn _bind(path: &Path, handle: &Handle) -> io::Result<UnixListener> {
+        let s = try!(mio_uds::UnixListener::bind(path));
+        UnixListener::new(s, handle)
     }
 
     fn new(listener: mio_uds::UnixListener,
-           handle: LoopHandle) -> IoFuture<UnixListener> {
-        ReadinessStream::new(handle, listener).map(|io| {
-            UnixListener { io: io }
-        }).boxed()
+           handle: &Handle) -> io::Result<UnixListener> {
+        let io = try!(PollEvented::new(listener, handle));
+        Ok(UnixListener { io: io })
     }
 
     /// Returns the local socket address of this listener.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.io.get_ref().local_addr()
+    }
+
+    /// Test whether this socket is ready to be read or not.
+    pub fn poll_read(&self) -> Async<()> {
+        self.io.poll_read()
     }
 
     /// Returns the value of the `SO_ERROR` option.
@@ -83,7 +84,9 @@ impl UnixListener {
             type Error = io::Error;
 
             fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
-                try_ready!(self.inner.io.poll_read());
+                if self.inner.io.poll_read().is_not_ready() {
+                    return Ok(Async::NotReady)
+                }
                 match try!(self.inner.io.get_ref().accept()) {
                     Some(pair) => {
                         Ok(Some(pair).into())
@@ -96,12 +99,18 @@ impl UnixListener {
             }
         }
 
-        let loop_handle = self.io.loop_handle().clone();
+        let remote = self.io.remote().clone();
         Incoming { inner: self }
             .and_then(move |(client, addr)| {
-                ReadinessStream::new(loop_handle.clone(), client).map(move |io| {
-                    (UnixStream { io: io }, addr)
-                })
+                let (tx, rx) = futures::oneshot();
+                remote.spawn(move |handle| {
+                    let res = PollEvented::new(client, handle).map(move |io| {
+                        (UnixStream { io: io }, addr)
+                    });
+                    tx.complete(res);
+                    Ok(())
+                });
+                rx.then(|res| res.expect("shouldn't be canceled"))
             }).boxed()
     }
 }
@@ -124,12 +133,7 @@ impl AsRawFd for UnixListener {
 /// from a listener with `UnixListener::incoming`. Additionally, a pair of
 /// anonymous Unix sockets can be created with `UnixStream::pair`.
 pub struct UnixStream {
-    io: ReadinessStream<mio_uds::UnixStream>,
-}
-
-enum UnixStreamNew {
-    Waiting(UnixStream),
-    Empty,
+    io: PollEvented<mio_uds::UnixStream>,
 }
 
 impl UnixStream {
@@ -141,17 +145,15 @@ impl UnixStream {
     ///
     /// The returned future will resolve once the stream is successfully
     /// connected.
-    pub fn connect<P>(p: P, handle: LoopHandle) -> IoFuture<UnixStream>
+    pub fn connect<P>(p: P, handle: &Handle) -> io::Result<UnixStream>
         where P: AsRef<Path>
     {
         UnixStream::_connect(p.as_ref(), handle)
     }
 
-    fn _connect(path: &Path, handle: LoopHandle) -> IoFuture<UnixStream> {
-        match mio_uds::UnixStream::connect(path) {
-            Ok(s) => UnixStream::new(s, handle),
-            Err(e) => futures::failed(e).boxed(),
-        }
+    fn _connect(path: &Path, handle: &Handle) -> io::Result<UnixStream> {
+        let s = try!(mio_uds::UnixStream::connect(path));
+        UnixStream::new(s, handle)
     }
 
     /// Creates an unnamed pair of connected sockets.
@@ -159,31 +161,26 @@ impl UnixStream {
     /// This function will create a pair of interconnected unix sockets for
     /// communicating back and forth between one another. Each socket will be
     /// associated with the event loop whose handle is also provided.
-    pub fn pair(handle: LoopHandle) -> IoFuture<(UnixStream, UnixStream)> {
-        match mio_uds::UnixStream::pair() {
-            Ok((a, b)) => {
-                let a = UnixStream::new(a, handle.clone());
-                let b = UnixStream::new(b, handle.clone());
-                a.join(b).boxed()
-            }
-            Err(e) => futures::failed(e).boxed(),
-        }
+    pub fn pair(handle: &Handle) -> io::Result<(UnixStream, UnixStream)> {
+        let (a, b) = try!(mio_uds::UnixStream::pair());
+        let a = try!(UnixStream::new(a, handle));
+        let b = try!(UnixStream::new(b, handle));
+        Ok((a, b))
     }
 
-    fn new(stream: mio_uds::UnixStream, handle: LoopHandle)
-           -> IoFuture<UnixStream> {
-        ReadinessStream::new(handle, stream).and_then(|io| {
-            UnixStreamNew::Waiting(UnixStream { io: io })
-        }).boxed()
+    fn new(stream: mio_uds::UnixStream, handle: &Handle)
+           -> io::Result<UnixStream> {
+        let io = try!(PollEvented::new(stream, handle));
+        Ok(UnixStream { io: io })
     }
 
     /// Test whether this socket is ready to be read or not.
-    pub fn poll_read(&self) -> Poll<(), io::Error> {
+    pub fn poll_read(&self) -> Async<()> {
         self.io.poll_read()
     }
 
     /// Test whether this socket is writey to be written to or not.
-    pub fn poll_write(&self) -> Poll<(), io::Error> {
+    pub fn poll_write(&self) -> Async<()> {
         self.io.poll_write()
     }
 
@@ -212,78 +209,54 @@ impl UnixStream {
     }
 }
 
-impl Future for UnixStreamNew {
-    type Item = UnixStream;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<UnixStream, io::Error> {
-        {
-            let stream = match *self {
-                UnixStreamNew::Waiting(ref s) => s,
-                UnixStreamNew::Empty => panic!("can't poll Unix stream twice"),
-            };
-            try_ready!(stream.io.poll_write());
-            if let Some(e) = try!(stream.io.get_ref().take_error()) {
-                return Err(e)
-            }
-        }
-        match mem::replace(self, UnixStreamNew::Empty) {
-            UnixStreamNew::Waiting(s) => Ok(s.into()),
-            UnixStreamNew::Empty => panic!(),
-        }
-    }
-}
-
 impl Read for UnixStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        <&UnixStream>::read(&mut &*self, buf)
+        self.io.read(buf)
     }
 }
 
 impl Write for UnixStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        <&UnixStream>::write(&mut &*self, buf)
+        self.io.write(buf)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.io.flush()
+    }
+}
+
+impl Io for UnixStream {
+    fn poll_read(&mut self) -> Async<()> {
+        <UnixStream>::poll_read(self)
     }
 
-    fn flush(&mut self) -> io::Result<()> {
-        <&UnixStream>::flush(&mut &*self)
+    fn poll_write(&mut self) -> Async<()> {
+        <UnixStream>::poll_write(self)
     }
 }
 
 impl<'a> Read for &'a UnixStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if let Async::NotReady = try!(self.io.poll_read()) {
-            return Err(mio::would_block())
-        }
-        let r = self.io.get_ref().read(buf);
-        if is_wouldblock(&r) {
-            self.io.need_read();
-        }
-        return r
+        (&self.io).read(buf)
     }
 }
 
 impl<'a> Write for &'a UnixStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if let Async::NotReady = try!(self.io.poll_write()) {
-            return Err(mio::would_block())
-        }
-        let r = self.io.get_ref().write(buf);
-        if is_wouldblock(&r) {
-            self.io.need_write();
-        }
-        return r
+        (&self.io).write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        if let Async::NotReady = try!(self.io.poll_write()) {
-            return Err(mio::would_block())
-        }
-        let r = self.io.get_ref().flush();
-        if is_wouldblock(&r) {
-            self.io.need_write();
-        }
-        return r
+        (&self.io).flush()
+    }
+}
+
+impl<'a> Io for &'a UnixStream {
+    fn poll_read(&mut self) -> Async<()> {
+        <UnixStream>::poll_read(self)
+    }
+
+    fn poll_write(&mut self) -> Async<()> {
+        <UnixStream>::poll_write(self)
     }
 }
 
@@ -301,22 +274,20 @@ impl AsRawFd for UnixStream {
 
 /// An I/O object representing a Unix datagram socket.
 pub struct UnixDatagram {
-    io: ReadinessStream<mio_uds::UnixDatagram>,
+    io: PollEvented<mio_uds::UnixDatagram>,
 }
 
 impl UnixDatagram {
     /// Creates a new `UnixDatagram` bound to the specified path.
-    pub fn bind<P>(path: P, handle: LoopHandle) -> IoFuture<UnixDatagram>
+    pub fn bind<P>(path: P, handle: &Handle) -> io::Result<UnixDatagram>
         where P: AsRef<Path>
     {
         UnixDatagram::_bind(path.as_ref(), handle)
     }
 
-    fn _bind(path: &Path, handle: LoopHandle) -> IoFuture<UnixDatagram> {
-        match mio_uds::UnixDatagram::bind(path) {
-            Ok(s) => UnixDatagram::new(s, handle),
-            Err(e) => futures::failed(e).boxed(),
-        }
+    fn _bind(path: &Path, handle: &Handle) -> io::Result<UnixDatagram> {
+        let s = try!(mio_uds::UnixDatagram::bind(path));
+        UnixDatagram::new(s, handle)
     }
 
     /// Creates an unnamed pair of connected sockets.
@@ -324,23 +295,18 @@ impl UnixDatagram {
     /// This function will create a pair of interconnected unix sockets for
     /// communicating back and forth between one another. Each socket will be
     /// associated with the event loop whose handle is also provided.
-    pub fn pair(handle: LoopHandle) -> IoFuture<(UnixDatagram, UnixDatagram)> {
-        match mio_uds::UnixDatagram::pair() {
-            Ok((a, b)) => {
-                let a = UnixDatagram::new(a, handle.clone());
-                let b = UnixDatagram::new(b, handle.clone());
-                a.join(b).boxed()
-            }
-            Err(e) => futures::failed(e).boxed(),
-        }
+    pub fn pair(handle: &Handle) -> io::Result<(UnixDatagram, UnixDatagram)> {
+        let (a, b) = try!(mio_uds::UnixDatagram::pair());
+        let a = try!(UnixDatagram::new(a, handle));
+        let b = try!(UnixDatagram::new(b, handle));
+        Ok((a, b))
     }
 
 
-    fn new(socket: mio_uds::UnixDatagram, handle: LoopHandle)
-           -> IoFuture<UnixDatagram> {
-        ReadinessStream::new(handle, socket).map(|io| {
-            UnixDatagram { io: io }
-        }).boxed()
+    fn new(socket: mio_uds::UnixDatagram, handle: &Handle)
+           -> io::Result<UnixDatagram> {
+        let io = try!(PollEvented::new(socket, handle));
+        Ok(UnixDatagram { io: io })
     }
 
     /// Connects the socket to the specified address.
@@ -352,12 +318,12 @@ impl UnixDatagram {
     }
 
     /// Test whether this socket is ready to be read or not.
-    pub fn poll_read(&self) -> Poll<(), io::Error> {
+    pub fn poll_read(&self) -> Async<()> {
         self.io.poll_read()
     }
 
     /// Test whether this socket is writey to be written to or not.
-    pub fn poll_write(&self) -> Poll<(), io::Error> {
+    pub fn poll_write(&self) -> Async<()> {
         self.io.poll_write()
     }
 
@@ -378,7 +344,7 @@ impl UnixDatagram {
     /// On success, returns the number of bytes read and the address from
     /// whence the data came.
     pub fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-        if let Async::NotReady = try!(self.io.poll_read()) {
+        if self.io.poll_read().is_not_ready() {
             return Err(mio::would_block())
         }
         let r = self.io.get_ref().recv_from(buf);
@@ -392,7 +358,7 @@ impl UnixDatagram {
     ///
     /// On success, returns the number of bytes read.
     pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
-        if let Async::NotReady = try!(self.io.poll_read()) {
+        if self.io.poll_read().is_not_ready() {
             return Err(mio::would_block())
         }
         let r = self.io.get_ref().recv(buf);
@@ -408,7 +374,7 @@ impl UnixDatagram {
     pub fn send_to<P>(&self, buf: &[u8], path: P) -> io::Result<usize>
         where P: AsRef<Path>
     {
-        if let Async::NotReady = try!(self.io.poll_write()) {
+        if self.io.poll_write().is_not_ready() {
             return Err(mio::would_block())
         }
         let r = self.io.get_ref().send_to(buf, path);
@@ -425,7 +391,7 @@ impl UnixDatagram {
     ///
     /// On success, returns the number of bytes written.
     pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
-        if let Async::NotReady = try!(self.io.poll_write()) {
+        if self.io.poll_write().is_not_ready() {
             return Err(mio::would_block())
         }
         let r = self.io.get_ref().send(buf);
