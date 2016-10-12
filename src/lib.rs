@@ -142,9 +142,6 @@ impl UnixStream {
     /// This function will create a new unix socket and connect to the path
     /// specified, performing associating the returned stream with the provided
     /// event loop's handle.
-    ///
-    /// The returned future will resolve once the stream is successfully
-    /// connected.
     pub fn connect<P>(p: P, handle: &Handle) -> io::Result<UnixStream>
         where P: AsRef<Path>
     {
