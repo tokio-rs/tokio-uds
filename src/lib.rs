@@ -50,7 +50,8 @@ impl UnixListener {
         UnixListener::new(s, handle)
     }
 
-    fn new(listener: mio_uds::UnixListener, handle: &Handle) -> io::Result<UnixListener> {
+    fn new(listener: mio_uds::UnixListener,
+           handle: &Handle) -> io::Result<UnixListener> {
         let io = try!(PollEvented::new(listener, handle));
         Ok(UnixListener { io: io })
     }
@@ -86,10 +87,12 @@ impl UnixListener {
 
             fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
                 if self.inner.io.poll_read().is_not_ready() {
-                    return Ok(Async::NotReady);
+                    return Ok(Async::NotReady)
                 }
                 match try!(self.inner.io.get_ref().accept()) {
-                    Some(pair) => Ok(Some(pair).into()),
+                    Some(pair) => {
+                        Ok(Some(pair).into())
+                    }
                     None => {
                         self.inner.io.need_read();
                         Ok(Async::NotReady)
@@ -103,14 +106,14 @@ impl UnixListener {
             .and_then(move |(client, addr)| {
                 let (tx, rx) = futures::oneshot();
                 remote.spawn(move |handle| {
-                    let res = PollEvented::new(client, handle)
-                        .map(move |io| (UnixStream { io: io }, addr));
+                    let res = PollEvented::new(client, handle).map(move |io| {
+                        (UnixStream { io: io }, addr)
+                    });
                     tx.complete(res);
                     Ok(())
                 });
                 rx.then(|res| res.expect("shouldn't be canceled"))
-            })
-            .boxed()
+            }).boxed()
     }
 }
 
@@ -164,7 +167,8 @@ impl UnixStream {
         Ok((a, b))
     }
 
-    fn new(stream: mio_uds::UnixStream, handle: &Handle) -> io::Result<UnixStream> {
+    fn new(stream: mio_uds::UnixStream, handle: &Handle)
+           -> io::Result<UnixStream> {
         let io = try!(PollEvented::new(stream, handle));
         Ok(UnixStream { io: io })
     }
@@ -298,7 +302,8 @@ impl UnixDatagram {
     }
 
 
-    fn new(socket: mio_uds::UnixDatagram, handle: &Handle) -> io::Result<UnixDatagram> {
+    fn new(socket: mio_uds::UnixDatagram, handle: &Handle)
+           -> io::Result<UnixDatagram> {
         let io = try!(PollEvented::new(socket, handle));
         Ok(UnixDatagram { io: io })
     }
@@ -339,13 +344,13 @@ impl UnixDatagram {
     /// whence the data came.
     pub fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
         if self.io.poll_read().is_not_ready() {
-            return Err(mio::would_block());
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().recv_from(buf);
         if is_wouldblock(&r) {
             self.io.need_read();
         }
-        return r;
+        return r
     }
 
     /// Receives data from the socket.
@@ -353,13 +358,13 @@ impl UnixDatagram {
     /// On success, returns the number of bytes read.
     pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
         if self.io.poll_read().is_not_ready() {
-            return Err(mio::would_block());
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().recv(buf);
         if is_wouldblock(&r) {
             self.io.need_read();
         }
-        return r;
+        return r
     }
 
     /// Returns a future for receiving a datagram. See the documentation on RecvDgram for details.
@@ -374,19 +379,6 @@ impl UnixDatagram {
         }
     }
 
-    /// Returns a future for receiving a datagram without the sender's address. This avoids
-    /// allocation overhead.
-    pub fn recv_anon_dgram<T>(self, buf: T) -> RecvAnonDgram<T>
-        where T: AsMut<[u8]>
-    {
-        RecvAnonDgram {
-            st: RecvDgramState::Receiving {
-                sock: self,
-                buf: buf,
-            },
-        }
-    }
-
     /// Sends data on the socket to the specified address.
     ///
     /// On success, returns the number of bytes written.
@@ -394,13 +386,13 @@ impl UnixDatagram {
         where P: AsRef<Path>
     {
         if self.io.poll_write().is_not_ready() {
-            return Err(mio::would_block());
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().send_to(buf, path);
         if is_wouldblock(&r) {
             self.io.need_write();
         }
-        return r;
+        return r
     }
 
     /// Sends data on the socket to the socket's peer.
@@ -411,13 +403,13 @@ impl UnixDatagram {
     /// On success, returns the number of bytes written.
     pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
         if self.io.poll_write().is_not_ready() {
-            return Err(mio::would_block());
+            return Err(mio::would_block())
         }
         let r = self.io.get_ref().send(buf);
         if is_wouldblock(&r) {
             self.io.need_write();
         }
-        return r;
+        return r
     }
 
 
@@ -528,10 +520,6 @@ pub struct RecvDgram<T> {
 ///
 /// This can be used if the peer's address is of no interest, so the allocation overhead can be
 /// avoided.
-pub struct RecvAnonDgram<T> {
-    st: RecvDgramState<T>,
-}
-
 enum RecvDgramState<T> {
     #[allow(dead_code)]
     Receiving { sock: UnixDatagram, buf: T },
@@ -566,35 +554,6 @@ impl<T> Future for RecvDgram<T>
         if let RecvDgramState::Receiving { sock, buf } = mem::replace(&mut self.st,
                                                                       RecvDgramState::Empty) {
             Ok(Async::Ready((sock, buf, received, peer)))
-        } else {
-            panic!()
-        }
-    }
-}
-
-impl<T> Future for RecvAnonDgram<T>
-    where T: AsMut<[u8]>
-{
-    /// RecvDgram yields a tuple of the underlying socket, the receive buffer, how many bytes were
-    /// received, and the address (path) of the peer sending the datagram. If the buffer is too small, the
-    /// datagram is truncated.
-    type Item = (UnixDatagram, T, usize);
-    /// This future yields io::Error if an error occurred.
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let received;
-
-        if let RecvDgramState::Receiving { ref sock, ref mut buf } = self.st {
-            let n = try_nb!(sock.recv(buf.as_mut()));
-            received = n;
-        } else {
-            panic!()
-        }
-
-        if let RecvDgramState::Receiving { sock, buf } = mem::replace(&mut self.st,
-                                                                      RecvDgramState::Empty) {
-            Ok(Async::Ready((sock, buf, received)))
         } else {
             panic!()
         }
