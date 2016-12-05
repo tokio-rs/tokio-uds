@@ -12,6 +12,7 @@
 
 #[macro_use]
 extern crate futures;
+#[macro_use]
 extern crate tokio_core;
 extern crate mio;
 extern crate mio_uds;
@@ -20,6 +21,7 @@ extern crate log;
 
 use std::fmt;
 use std::io::{self, Read, Write};
+use std::mem;
 use std::net::Shutdown;
 use std::os::unix::net::SocketAddr;
 use std::os::unix::prelude::*;
@@ -365,6 +367,18 @@ impl UnixDatagram {
         return r
     }
 
+    /// Returns a future for receiving a datagram. See the documentation on RecvDgram for details.
+    pub fn recv_dgram<T>(self, buf: T) -> RecvDgram<T>
+        where T: AsMut<[u8]>
+    {
+        RecvDgram {
+            st: RecvDgramState::Receiving {
+                sock: self,
+                buf: buf,
+            },
+        }
+    }
+
     /// Sends data on the socket to the specified address.
     ///
     /// On success, returns the number of bytes written.
@@ -398,6 +412,21 @@ impl UnixDatagram {
         return r
     }
 
+
+    /// Returns a future sending the data in buf to the socket at path.
+    pub fn send_dgram<T, P>(self, buf: T, path: P) -> SendDgram<T, P>
+        where T: AsRef<[u8]>,
+              P: AsRef<Path>
+    {
+        SendDgram {
+            st: SendDgramState::Sending {
+                sock: self,
+                buf: buf,
+                addr: path,
+            },
+        }
+    }
+
     /// Returns the value of the `SO_ERROR` option.
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
         self.io.get_ref().take_error()
@@ -429,5 +458,104 @@ fn is_wouldblock<T>(r: &io::Result<T>) -> bool {
     match *r {
         Ok(_) => false,
         Err(ref e) => e.kind() == io::ErrorKind::WouldBlock,
+    }
+}
+
+/// A future for writing a buffer to a Unix datagram socket.
+pub struct SendDgram<T, P> {
+    st: SendDgramState<T, P>,
+}
+
+enum SendDgramState<T, P> {
+    /// current state is Sending
+    Sending {
+        /// the underlying socket
+        sock: UnixDatagram,
+        /// the buffer to send
+        buf: T,
+        /// the destination
+        addr: P,
+    },
+    /// neutral state
+    Empty,
+}
+
+impl<T, P> Future for SendDgram<T, P>
+    where T: AsRef<[u8]>,
+          P: AsRef<Path>
+{
+    /// Returns the underlying socket and the buffer that was sent.
+    type Item = (UnixDatagram, T);
+    /// The error that is returned when sending failed.
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        if let SendDgramState::Sending { ref sock, ref buf, ref addr } = self.st {
+            let n = try_nb!(sock.send_to(buf.as_ref(), addr));
+            if n < buf.as_ref().len() {
+                return Err(io::Error::new(io::ErrorKind::Other,
+                                          "Couldn't send whole buffer".to_string()));
+            }
+        } else {
+            panic!()
+        }
+        if let SendDgramState::Sending { sock, buf, addr: _ } =
+               mem::replace(&mut self.st, SendDgramState::Empty) {
+            Ok(Async::Ready((sock, buf)))
+        } else {
+            panic!()
+        }
+    }
+}
+
+/// A future for receiving datagrams from a Unix datagram socket.
+///
+/// An example that uses UDP sockets but is still applicable can be found at
+/// https://gist.github.com/dermesser/e331094c2ab28fc7f6ba8a16183fe4d5.
+pub struct RecvDgram<T> {
+    st: RecvDgramState<T>,
+}
+
+/// A future similar to RecvDgram, but without allocating and returning the peer's address.
+///
+/// This can be used if the peer's address is of no interest, so the allocation overhead can be
+/// avoided.
+enum RecvDgramState<T> {
+    #[allow(dead_code)]
+    Receiving { sock: UnixDatagram, buf: T },
+    Empty,
+}
+
+impl<T> Future for RecvDgram<T>
+    where T: AsMut<[u8]>
+{
+    /// RecvDgram yields a tuple of the underlying socket, the receive buffer, how many bytes were
+    /// received, and the address (path) of the peer sending the datagram. If the buffer is too small, the
+    /// datagram is truncated.
+    type Item = (UnixDatagram, T, usize, String);
+    /// This future yields io::Error if an error occurred.
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let received;
+        let peer;
+
+        if let RecvDgramState::Receiving { ref sock, ref mut buf } = self.st {
+            let (n, p) = try_nb!(sock.recv_from(buf.as_mut()));
+            received = n;
+
+            peer = p.as_pathname().map_or(String::new(),
+                                          |p| p.to_str().map_or(String::new(), |s| s.to_string()));
+
+        } else {
+            panic!()
+        }
+
+        if let RecvDgramState::Receiving { sock, buf } = mem::replace(&mut self.st,
+                                                                      RecvDgramState::Empty) {
+            Ok(Async::Ready((sock, buf, received, peer)))
+        } else {
+            panic!()
+        }
     }
 }
