@@ -32,6 +32,9 @@ use futures::stream::Stream;
 use tokio_core::reactor::{PollEvented, Handle};
 use tokio_core::io::{Io, IoStream};
 
+mod frame;
+pub use frame::{UnixDatagramFramed, UnixDatagramCodec};
+
 /// A Unix socket which can accept connections from other unix sockets.
 pub struct UnixListener {
     io: PollEvented<mio_uds::UnixListener>,
@@ -439,6 +442,31 @@ impl UnixDatagram {
     /// (see the documentation of `Shutdown`).
     pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
         self.io.get_ref().shutdown(how)
+    }
+
+    /// Provides a `Stream` and `Sink` interface for reading and writing to
+    /// this `UnixDatagram` object, using the provided `UnixDatagramCodec` to
+    /// read and write the raw data.
+    ///
+    /// Raw `UnixDatagram` sockets work with datagrams, but higher-level code
+    /// usually wants to batch these into meaningful chunks, called "frames".
+    /// This method layers framing on top of this socket by using the
+    /// `UnixDatagramCodec` trait to handle encoding and decoding of messages
+    /// frames. Note that the incoming and outgoing frame types may be distinct.
+    ///
+    /// This function returns a *single* object that is both `Stream` and
+    /// `Sink`; grouping this into a single object is often useful for layering
+    /// things which require both read and write access to the underlying
+    /// object.
+    ///
+    /// If you want to work more directly with the streams and sink, consider
+    /// calling `split` on the `UnixDatagramFramed` returned by this method,
+    /// which will break them into separate objects, allowing them to interact
+    /// more easily.
+    pub fn framed<C>(self, codec: C) -> UnixDatagramFramed<C>
+        where C: UnixDatagramCodec,
+    {
+        frame::new(self, codec)
     }
 }
 
