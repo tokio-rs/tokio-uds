@@ -23,7 +23,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::mem;
 use std::net::Shutdown;
-use std::os::unix::net::SocketAddr;
+use std::os::unix::net::{self, SocketAddr};
 use std::os::unix::prelude::*;
 use std::path::Path;
 
@@ -46,6 +46,17 @@ impl UnixListener {
         where P: AsRef<Path>
     {
         UnixListener::_bind(path.as_ref(), handle)
+    }
+
+    /// Consumes a `UnixListener` in the standard library and returns a
+    /// nonblocking `UnixListener` from this crate.
+    ///
+    /// The returned listener will be associated with the given event loop
+    /// specified by `handle` and is ready to perform I/O.
+    pub fn from_listener(listener: net::UnixListener, handle: &Handle)
+                         -> io::Result<UnixListener> {
+        let s = try!(mio_uds::UnixListener::from_listener(listener));
+        UnixListener::new(s, handle)
     }
 
     fn _bind(path: &Path, handle: &Handle) -> io::Result<UnixListener> {
@@ -155,6 +166,17 @@ impl UnixStream {
 
     fn _connect(path: &Path, handle: &Handle) -> io::Result<UnixStream> {
         let s = try!(mio_uds::UnixStream::connect(path));
+        UnixStream::new(s, handle)
+    }
+
+    /// Consumes a `UnixStream` in the standard library and returns a
+    /// nonblocking `UnixStream` from this crate.
+    ///
+    /// The returned stream will be associated with the given event loop
+    /// specified by `handle` and is ready to perform I/O.
+    pub fn from_stream(stream: net::UnixStream, handle: &Handle)
+                       -> io::Result<UnixStream> {
+        let s = try!(mio_uds::UnixStream::from_stream(stream));
         UnixStream::new(s, handle)
     }
 
@@ -304,6 +326,16 @@ impl UnixDatagram {
         Ok((a, b))
     }
 
+    /// Consumes a `UnixDatagram` in the standard library and returns a
+    /// nonblocking `UnixDatagram` from this crate.
+    ///
+    /// The returned datagram will be associated with the given event loop
+    /// specified by `handle` and is ready to perform I/O.
+    pub fn from_datagram(datagram: net::UnixDatagram, handle: &Handle)
+                       -> io::Result<UnixDatagram> {
+        let s = try!(mio_uds::UnixDatagram::from_datagram(datagram));
+        UnixDatagram::new(s, handle)
+    }
 
     fn new(socket: mio_uds::UnixDatagram, handle: &Handle)
            -> io::Result<UnixDatagram> {

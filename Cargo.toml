@@ -12,7 +12,7 @@ Unix Domain sockets for Tokio
 
 [dependencies]
 mio = "0.6"
-mio-uds = "0.6"
+mio-uds = "0.6.1"
 futures = "0.1"
 tokio-core = "0.1"
 log = "0.3"
