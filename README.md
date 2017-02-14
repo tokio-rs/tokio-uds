@@ -4,7 +4,7 @@ An implementation of Unix Domain Sockets for Tokio
 
 [![Build Status](https://travis-ci.org/tokio-rs/tokio-uds.svg?branch=master)](https://travis-ci.org/tokio-rs/tokio-uds)
 
-[Documentation](https://tokio-rs.github.io/tokio-uds)
+[Documentation](https://docs.rs/tokio-uds)
 
 ## Usage
 

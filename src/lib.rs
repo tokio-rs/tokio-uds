@@ -9,6 +9,7 @@
 
 #![cfg(unix)]
 #![deny(missing_docs)]
+#![doc(html_root_url = "https://docs.rs/tokio-uds/0.1")]
 
 #[macro_use]
 extern crate futures;
