@@ -28,8 +28,8 @@ use std::os::unix::net::{self, SocketAddr};
 use std::os::unix::prelude::*;
 use std::path::Path;
 
-use futures::{Future, Poll, Async};
-use futures::stream::Stream;
+use futures::{Future, Poll, Async, Stream};
+use futures::sync::oneshot;
 use tokio_core::reactor::{PollEvented, Handle};
 use tokio_core::io::{Io, IoStream};
 
@@ -39,6 +39,7 @@ pub use frame::{UnixDatagramFramed, UnixDatagramCodec};
 /// A Unix socket which can accept connections from other unix sockets.
 pub struct UnixListener {
     io: PollEvented<mio_uds::UnixListener>,
+    pending_accept: Option<oneshot::Receiver<io::Result<(UnixStream, SocketAddr)>>>,
 }
 
 impl UnixListener {
@@ -68,7 +69,10 @@ impl UnixListener {
     fn new(listener: mio_uds::UnixListener,
            handle: &Handle) -> io::Result<UnixListener> {
         let io = try!(PollEvented::new(listener, handle));
-        Ok(UnixListener { io: io })
+        Ok(UnixListener {
+            io: io,
+            pending_accept: None,
+        })
     }
 
     /// Returns the local socket address of this listener.
@@ -86,6 +90,74 @@ impl UnixListener {
         self.io.get_ref().take_error()
     }
 
+    /// Attempt to accept a connection and create a new connected `UnixStream`
+    /// if successful.
+    ///
+    /// This function will attempt an accept operation, but will not block
+    /// waiting for it to complete. If the operation would block then a "would
+    /// block" error is returned. Additionally, if this method would block, it
+    /// registers the current task to receive a notification when it would
+    /// otherwise not block.
+    ///
+    /// Note that typically for simple usage it's easier to treat incoming
+    /// connections as a `Stream` of `UnixStream`s with the `incoming` method
+    /// below.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is called outside the context of a
+    /// future's task. It's recommended to only call this from the
+    /// implementation of a `Future::poll`, if necessary.
+    pub fn accept(&mut self) -> io::Result<(UnixStream, SocketAddr)> {
+        loop {
+            if let Some(mut pending) = self.pending_accept.take() {
+                match pending.poll().expect("shouldn't be canceled") {
+                    Async::NotReady => {
+                        self.pending_accept = Some(pending);
+                        return Err(mio::would_block())
+                    },
+                    Async::Ready(r) => return r,
+                }
+            }
+
+            if let Async::NotReady = self.io.poll_read() {
+                return Err(io::Error::new(io::ErrorKind::WouldBlock, "not ready"))
+            }
+
+            match try!(self.io.get_ref().accept()) {
+                None => {
+                    self.io.need_read();
+                    return Err(io::Error::new(io::ErrorKind::WouldBlock,
+                                              "not ready"))
+                }
+                Some((sock, addr)) => {
+                    // Fast path if we haven't left the event loop
+                    if let Some(handle) = self.io.remote().handle() {
+                        let io = try!(PollEvented::new(sock, &handle));
+                        return Ok((UnixStream { io: io }, addr))
+                    }
+
+                    // If we're off the event loop then send the socket back
+                    // over there to get registered and then we'll get it back
+                    // eventually.
+                    let (tx, rx) = oneshot::channel();
+                    let remote = self.io.remote().clone();
+                    remote.spawn(move |handle| {
+                        let res = PollEvented::new(sock, handle)
+                            .map(move |io| {
+                                (UnixStream { io: io }, addr)
+                            });
+                        tx.complete(res);
+                        Ok(())
+                    });
+                    self.pending_accept = Some(rx);
+                    // continue to polling the `rx` at the beginning of the loop
+                }
+            }
+        }
+    }
+
+
     /// Consumes this listener, returning a stream of the sockets this listener
     /// accepts.
     ///
@@ -97,38 +169,15 @@ impl UnixListener {
         }
 
         impl Stream for Incoming {
-            type Item = (mio_uds::UnixStream, SocketAddr);
+            type Item = (UnixStream, SocketAddr);
             type Error = io::Error;
 
             fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
-                if self.inner.io.poll_read().is_not_ready() {
-                    return Ok(Async::NotReady)
-                }
-                match try!(self.inner.io.get_ref().accept()) {
-                    Some(pair) => {
-                        Ok(Some(pair).into())
-                    }
-                    None => {
-                        self.inner.io.need_read();
-                        Ok(Async::NotReady)
-                    }
-                }
+                Ok(Some(try_nb!(self.inner.accept())).into())
             }
         }
 
-        let remote = self.io.remote().clone();
-        Incoming { inner: self }
-            .and_then(move |(client, addr)| {
-                let (tx, rx) = futures::oneshot();
-                remote.spawn(move |handle| {
-                    let res = PollEvented::new(client, handle).map(move |io| {
-                        (UnixStream { io: io }, addr)
-                    });
-                    tx.complete(res);
-                    Ok(())
-                });
-                rx.then(|res| res.expect("shouldn't be canceled"))
-            }).boxed()
+        Incoming { inner: self }.boxed()
     }
 }
 
