@@ -253,7 +253,7 @@ impl UnixStream {
         self.io.poll_read()
     }
 
-    /// Test whether this socket is writey to be written to or not.
+    /// Test whether this socket is ready to be written to or not.
     pub fn poll_write(&self) -> Async<()> {
         self.io.poll_write()
     }
@@ -406,7 +406,7 @@ impl UnixDatagram {
         self.io.poll_read()
     }
 
-    /// Test whether this socket is writey to be written to or not.
+    /// Test whether this socket is ready to be written to or not.
     pub fn poll_write(&self) -> Async<()> {
         self.io.poll_write()
     }
