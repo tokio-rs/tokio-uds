@@ -116,6 +116,11 @@ impl<C: UnixDatagramCodec> Sink for UnixDatagramFramed<C> {
                                "failed to write entire datagram to socket"))
         }
     }
+
+    fn close(&mut self) -> Poll<(), io::Error> {
+        try_ready!(self.poll_complete());
+        Ok(().into())
+    }
 }
 
 pub fn new<C: UnixDatagramCodec>(socket: UnixDatagram, codec: C) -> UnixDatagramFramed<C> {

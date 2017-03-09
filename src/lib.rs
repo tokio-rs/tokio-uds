@@ -11,10 +11,14 @@
 #![deny(missing_docs)]
 #![doc(html_root_url = "https://docs.rs/tokio-uds/0.1")]
 
+extern crate bytes;
 #[macro_use]
 extern crate futures;
+extern crate iovec;
+extern crate libc;
 #[macro_use]
 extern crate tokio_core;
+extern crate tokio_io;
 extern crate mio;
 extern crate mio_uds;
 #[macro_use]
@@ -28,13 +32,20 @@ use std::os::unix::net::{self, SocketAddr};
 use std::os::unix::prelude::*;
 use std::path::Path;
 
+use bytes::{Buf, BufMut};
 use futures::{Future, Poll, Async, Stream};
 use futures::sync::oneshot;
 use tokio_core::reactor::{PollEvented, Handle};
-use tokio_core::io::{Io, IoStream};
+#[allow(deprecated)]
+use tokio_core::io::Io;
+use tokio_io::{IoStream, AsyncRead, AsyncWrite};
 
 mod frame;
 pub use frame::{UnixDatagramFramed, UnixDatagramCodec};
+
+fn would_block() -> io::Error {
+    io::Error::new(io::ErrorKind::WouldBlock, "would block")
+}
 
 /// A Unix socket which can accept connections from other unix sockets.
 pub struct UnixListener {
@@ -114,7 +125,7 @@ impl UnixListener {
                 match pending.poll().expect("shouldn't be canceled") {
                     Async::NotReady => {
                         self.pending_accept = Some(pending);
-                        return Err(mio::would_block())
+                        return Err(would_block())
                     },
                     Async::Ready(r) => return r,
                 }
@@ -147,7 +158,7 @@ impl UnixListener {
                             .map(move |io| {
                                 (UnixStream { io: io }, addr)
                             });
-                        tx.complete(res);
+                        drop(tx.send(res));
                         Ok(())
                     });
                     self.pending_accept = Some(rx);
@@ -298,6 +309,7 @@ impl Write for UnixStream {
     }
 }
 
+#[allow(deprecated)]
 impl Io for UnixStream {
     fn poll_read(&mut self) -> Async<()> {
         <UnixStream>::poll_read(self)
@@ -305,6 +317,26 @@ impl Io for UnixStream {
 
     fn poll_write(&mut self) -> Async<()> {
         <UnixStream>::poll_write(self)
+    }
+}
+
+impl AsyncRead for UnixStream {
+    unsafe fn prepare_uninitialized_buffer(&self, _: &mut [u8]) -> bool {
+        false
+    }
+
+    fn read_buf<B: BufMut>(&mut self, buf: &mut B) -> Poll<usize, io::Error> {
+        <&UnixStream>::read_buf(&mut &*self, buf)
+    }
+}
+
+impl AsyncWrite for UnixStream {
+    fn shutdown(&mut self) -> Poll<(), io::Error> {
+        <&UnixStream>::shutdown(&mut &*self)
+    }
+
+    fn write_buf<B: Buf>(&mut self, buf: &mut B) -> Poll<usize, io::Error> {
+        <&UnixStream>::write_buf(&mut &*self, buf)
     }
 }
 
@@ -324,6 +356,7 @@ impl<'a> Write for &'a UnixStream {
     }
 }
 
+#[allow(deprecated)]
 impl<'a> Io for &'a UnixStream {
     fn poll_read(&mut self) -> Async<()> {
         <UnixStream>::poll_read(self)
@@ -331,6 +364,74 @@ impl<'a> Io for &'a UnixStream {
 
     fn poll_write(&mut self) -> Async<()> {
         <UnixStream>::poll_write(self)
+    }
+}
+
+impl<'a> AsyncRead for &'a UnixStream {
+    unsafe fn prepare_uninitialized_buffer(&self, _: &mut [u8]) -> bool {
+        false
+    }
+
+    fn read_buf<B: BufMut>(&mut self, buf: &mut B) -> Poll<usize, io::Error> {
+        if let Async::NotReady = <UnixStream>::poll_read(self) {
+            return Err(would_block())
+        }
+        let mut bufs: [_; 16] = Default::default();
+        unsafe {
+            let n = buf.bytes_vec_mut(&mut bufs);
+            let iovecs = iovec::unix::as_os_slice_mut(&mut bufs[..n]);
+
+            let r = libc::readv(self.as_raw_fd(),
+                                iovecs.as_ptr(),
+                                iovecs.len() as i32);
+            if r == -1 {
+                let e = io::Error::last_os_error();
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    self.io.need_read();
+                    Ok(Async::NotReady)
+                } else {
+                    Err(e)
+                }
+            } else {
+                let r = r as usize;
+                buf.advance_mut(r);
+                Ok(r.into())
+            }
+        }
+    }
+}
+
+impl<'a> AsyncWrite for &'a UnixStream {
+    fn shutdown(&mut self) -> Poll<(), io::Error> {
+        Ok(().into())
+    }
+
+    fn write_buf<B: Buf>(&mut self, buf: &mut B) -> Poll<usize, io::Error> {
+        if let Async::NotReady = <UnixStream>::poll_write(self) {
+            return Err(would_block())
+        }
+        let mut bufs: [_; 16] = Default::default();
+        unsafe {
+            let n = buf.bytes_vec(&mut bufs);
+            let iovecs = iovec::unix::as_os_slice(&bufs[..n]);
+
+            let r = libc::writev(self.as_raw_fd(),
+                                 iovecs.as_ptr(),
+                                 iovecs.len() as i32);
+            if r == -1 {
+                let e = io::Error::last_os_error();
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    self.io.need_write();
+                    Ok(Async::NotReady)
+                } else {
+                    Err(e)
+                }
+            } else {
+                let r = r as usize;
+                buf.advance(r);
+                Ok(r.into())
+            }
+        }
     }
 }
 
@@ -429,7 +530,7 @@ impl UnixDatagram {
     /// whence the data came.
     pub fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
         if self.io.poll_read().is_not_ready() {
-            return Err(mio::would_block())
+            return Err(would_block())
         }
         let r = self.io.get_ref().recv_from(buf);
         if is_wouldblock(&r) {
@@ -443,7 +544,7 @@ impl UnixDatagram {
     /// On success, returns the number of bytes read.
     pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
         if self.io.poll_read().is_not_ready() {
-            return Err(mio::would_block())
+            return Err(would_block())
         }
         let r = self.io.get_ref().recv(buf);
         if is_wouldblock(&r) {
@@ -471,7 +572,7 @@ impl UnixDatagram {
         where P: AsRef<Path>
     {
         if self.io.poll_write().is_not_ready() {
-            return Err(mio::would_block())
+            return Err(would_block())
         }
         let r = self.io.get_ref().send_to(buf, path);
         if is_wouldblock(&r) {
@@ -488,7 +589,7 @@ impl UnixDatagram {
     /// On success, returns the number of bytes written.
     pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
         if self.io.poll_write().is_not_ready() {
-            return Err(mio::would_block())
+            return Err(would_block())
         }
         let r = self.io.get_ref().send(buf);
         if is_wouldblock(&r) {
