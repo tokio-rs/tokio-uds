@@ -367,6 +367,17 @@ impl<'a> Io for &'a UnixStream {
     }
 }
 
+unsafe fn read_ready<B: BufMut>(buf: &mut B, raw_fd: RawFd) -> isize {
+    let mut bufs: [_; 16] = Default::default();
+
+    let n = buf.bytes_vec_mut(&mut bufs);
+    let iovecs = iovec::unix::as_os_slice_mut(&mut bufs[..n]);
+
+    libc::readv(raw_fd,
+                iovecs.as_ptr(),
+                iovecs.len() as i32)
+}
+
 impl<'a> AsyncRead for &'a UnixStream {
     unsafe fn prepare_uninitialized_buffer(&self, _: &mut [u8]) -> bool {
         false
@@ -376,14 +387,8 @@ impl<'a> AsyncRead for &'a UnixStream {
         if let Async::NotReady = <UnixStream>::poll_read(self) {
             return Err(would_block())
         }
-        let mut bufs: [_; 16] = Default::default();
         unsafe {
-            let n = buf.bytes_vec_mut(&mut bufs);
-            let iovecs = iovec::unix::as_os_slice_mut(&mut bufs[..n]);
-
-            let r = libc::readv(self.as_raw_fd(),
-                                iovecs.as_ptr(),
-                                iovecs.len() as i32);
+            let r = read_ready(buf, self.as_raw_fd());
             if r == -1 {
                 let e = io::Error::last_os_error();
                 if e.kind() == io::ErrorKind::WouldBlock {
@@ -401,6 +406,17 @@ impl<'a> AsyncRead for &'a UnixStream {
     }
 }
 
+unsafe fn write_ready<B: Buf>(buf: &mut B, raw_fd: RawFd) -> isize {
+    let mut bufs: [_; 16] = Default::default();
+
+    let n = buf.bytes_vec(&mut bufs);
+    let iovecs = iovec::unix::as_os_slice(&bufs[..n]);
+
+    libc::writev(raw_fd,
+                iovecs.as_ptr(),
+                iovecs.len() as i32)
+}
+
 impl<'a> AsyncWrite for &'a UnixStream {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         Ok(().into())
@@ -410,14 +426,8 @@ impl<'a> AsyncWrite for &'a UnixStream {
         if let Async::NotReady = <UnixStream>::poll_write(self) {
             return Err(would_block())
         }
-        let mut bufs: [_; 16] = Default::default();
         unsafe {
-            let n = buf.bytes_vec(&mut bufs);
-            let iovecs = iovec::unix::as_os_slice(&bufs[..n]);
-
-            let r = libc::writev(self.as_raw_fd(),
-                                 iovecs.as_ptr(),
-                                 iovecs.len() as i32);
+            let r = write_ready(buf, self.as_raw_fd());
             if r == -1 {
                 let e = io::Error::last_os_error();
                 if e.kind() == io::ErrorKind::WouldBlock {
