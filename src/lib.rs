@@ -424,7 +424,7 @@ impl<'a> AsyncWrite for &'a UnixStream {
 
     fn write_buf<B: Buf>(&mut self, buf: &mut B) -> Poll<usize, io::Error> {
         if let Async::NotReady = <UnixStream>::poll_write(self) {
-            return Err(would_block())
+            return Ok(Async::NotReady)
         }
         unsafe {
             let r = write_ready(buf, self.as_raw_fd());
