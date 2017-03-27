@@ -385,7 +385,7 @@ impl<'a> AsyncRead for &'a UnixStream {
 
     fn read_buf<B: BufMut>(&mut self, buf: &mut B) -> Poll<usize, io::Error> {
         if let Async::NotReady = <UnixStream>::poll_read(self) {
-            return Err(would_block())
+            return Ok(Async::NotReady)
         }
         unsafe {
             let r = read_ready(buf, self.as_raw_fd());
