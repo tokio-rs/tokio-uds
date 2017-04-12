@@ -504,6 +504,12 @@ impl UnixDatagram {
         Ok(UnixDatagram { io: io })
     }
 
+    /// Creates a new `UnixDatagram` which is not bound to any address.
+    pub fn unbound(handle: &Handle) -> io::Result<UnixDatagram> {
+        let s = try!(mio_uds::UnixDatagram::unbound());
+        UnixDatagram::new(s, handle)
+    }
+
     /// Connects the socket to the specified address.
     ///
     /// The `send` method may be used to send data to the specified address.
