@@ -16,17 +16,12 @@ pub use self::impl_linux::get_peer_cred;
 
 #[cfg(target_os = "linux")]
 pub mod impl_linux {
-    use libc::{pid_t, uid_t, gid_t, getsockopt, SOL_SOCKET, SO_PEERCRED, c_void};
+    use libc::{getsockopt, SOL_SOCKET, SO_PEERCRED, c_void};
     use std::{io, mem};
     use UnixStream;
     use std::os::unix::io::AsRawFd;
 
-    #[repr(C)]
-    struct UCred {
-        pid: pid_t,
-        uid: uid_t,
-        gid: gid_t,
-    }
+    use libc::ucred as UCred;
 
     pub fn get_peer_cred(sock: &UnixStream) -> io::Result<super::UCred> {
         unsafe {
