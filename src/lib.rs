@@ -42,6 +42,8 @@ use tokio_io::{IoStream, AsyncRead, AsyncWrite};
 
 mod frame;
 pub use frame::{UnixDatagramFramed, UnixDatagramCodec};
+mod ucred;
+pub use ucred::UCred;
 
 fn would_block() -> io::Error {
     io::Error::new(io::ErrorKind::WouldBlock, "would block")
@@ -250,6 +252,7 @@ impl UnixStream {
         let (a, b) = try!(mio_uds::UnixStream::pair());
         let a = try!(UnixStream::new(a, handle));
         let b = try!(UnixStream::new(b, handle));
+
         Ok((a, b))
     }
 
@@ -277,6 +280,12 @@ impl UnixStream {
     /// Returns the socket address of the remote half of this connection.
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
         self.io.get_ref().peer_addr()
+    }
+
+    /// Returns effective credentials of the process which called `connect` or `socketpair`.
+    #[cfg(target_os = "linux")]
+    pub fn peer_cred(&self) -> io::Result<UCred> {
+        ucred::get_peer_cred(self)
     }
 
     /// Returns the value of the `SO_ERROR` option.
