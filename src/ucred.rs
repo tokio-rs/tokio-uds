@@ -1,10 +1,8 @@
-use libc::{pid_t, uid_t, gid_t};
+use libc::{uid_t, gid_t};
 
 /// Credentials of a process
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct UCred {
-    /// PID (process ID) of the process
-    pub pid: pid_t,
     /// UID (user ID) of the process
     pub uid: uid_t,
     /// GID (group ID) of the process
@@ -40,7 +38,6 @@ pub mod impl_linux {
             let ret = getsockopt(raw_fd, SOL_SOCKET, SO_PEERCRED, &mut ucred as *mut UCred as *mut c_void, &mut ucred_size);
             if ret == 0 && ucred_size as usize == mem::size_of::<UCred>() {
                 Ok(super::UCred {
-                    pid: ucred.pid,
                     uid: ucred.uid,
                     gid: ucred.gid,
                 })
