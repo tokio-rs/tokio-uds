@@ -12,6 +12,9 @@ pub struct UCred {
 #[cfg(target_os = "linux")]
 pub use self::impl_linux::get_peer_cred;
 
+#[cfg(target_os = "macos")]
+pub use self::impl_macos::get_peer_cred;
+
 #[cfg(target_os = "linux")]
 pub mod impl_linux {
     use libc::{getsockopt, SOL_SOCKET, SO_PEERCRED, c_void};
@@ -41,6 +44,30 @@ pub mod impl_linux {
                     uid: ucred.uid,
                     gid: ucred.gid,
                 })
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub mod impl_macos {
+    use libc::getpeereid;
+    use std::{io, mem};
+    use UnixStream;
+    use std::os::unix::io::AsRawFd;
+
+    pub fn get_peer_cred(sock: &UnixStream) -> io::Result<super::UCred> {
+        unsafe {
+            let raw_fd = sock.as_raw_fd();
+
+            let mut cred: super::UCred = mem::uninitialized();
+
+            let ret = getpeereid(raw_fd, &mut cred.uid, &mut cred.pid);
+
+            if ret == 0 {
+                Ok(cred)
             } else {
                 Err(io::Error::last_os_error())
             }
