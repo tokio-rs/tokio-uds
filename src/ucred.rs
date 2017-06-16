@@ -64,7 +64,7 @@ pub mod impl_macos {
 
             let mut cred: super::UCred = mem::uninitialized();
 
-            let ret = getpeereid(raw_fd, &mut cred.uid, &mut cred.pid);
+            let ret = getpeereid(raw_fd, &mut cred.uid, &mut cred.gid);
 
             if ret == 0 {
                 Ok(cred)
