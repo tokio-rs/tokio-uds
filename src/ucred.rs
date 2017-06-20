@@ -22,15 +22,15 @@ pub mod impl_linux {
     use UnixStream;
     use std::os::unix::io::AsRawFd;
 
-    use libc::ucred as UCred;
+    use libc::ucred;
 
     pub fn get_peer_cred(sock: &UnixStream) -> io::Result<super::UCred> {
         unsafe {
             let raw_fd = sock.as_raw_fd();
 
-            let mut ucred: UCred = mem::uninitialized();
+            let mut ucred = ucred { pid: 0, uid: 0, gid: 0 };
 
-            let ucred_size = mem::size_of::<UCred>();
+            let ucred_size = mem::size_of::<ucred>();
 
             // These paranoid checks should be optimized-out
             assert!(mem::size_of::<u32>() <= mem::size_of::<usize>());
@@ -38,8 +38,8 @@ pub mod impl_linux {
 
             let mut ucred_size = ucred_size as u32;
             
-            let ret = getsockopt(raw_fd, SOL_SOCKET, SO_PEERCRED, &mut ucred as *mut UCred as *mut c_void, &mut ucred_size);
-            if ret == 0 && ucred_size as usize == mem::size_of::<UCred>() {
+            let ret = getsockopt(raw_fd, SOL_SOCKET, SO_PEERCRED, &mut ucred as *mut ucred as *mut c_void, &mut ucred_size);
+            if ret == 0 && ucred_size as usize == mem::size_of::<ucred>() {
                 Ok(super::UCred {
                     uid: ucred.uid,
                     gid: ucred.gid,
@@ -51,7 +51,7 @@ pub mod impl_linux {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
 pub mod impl_macos {
     use libc::getpeereid;
     use std::{io, mem};

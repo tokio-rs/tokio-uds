@@ -283,7 +283,6 @@ impl UnixStream {
     }
 
     /// Returns effective credentials of the process which called `connect` or `socketpair`.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub fn peer_cred(&self) -> io::Result<UCred> {
         ucred::get_peer_cred(self)
     }
