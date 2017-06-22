@@ -74,3 +74,28 @@ pub mod impl_macos {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use tokio_core::reactor::Core;
+    use UnixStream;
+    use libc::geteuid;
+    use libc::getegid;
+
+    #[test]
+    fn test_socket_pair() {
+        let core = Core::new().unwrap();
+        let handle = core.handle();
+
+        let (a, b) = UnixStream::pair(&handle).unwrap();
+        let cred_a = a.peer_cred().unwrap();
+        let cred_b = b.peer_cred().unwrap();
+        assert_eq!(cred_a, cred_b);
+
+        let uid = unsafe { geteuid() };
+        let gid = unsafe { getegid() };
+
+        assert_eq!(cred_a.uid, uid);
+        assert_eq!(cred_a.gid, gid);
+    }
+}
