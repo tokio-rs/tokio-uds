@@ -35,6 +35,7 @@ use std::path::Path;
 use bytes::{Buf, BufMut};
 use futures::{Future, Poll, Async, Stream};
 use futures::sync::oneshot;
+use iovec::IoVec;
 use tokio_core::reactor::{PollEvented, Handle};
 #[allow(deprecated)]
 use tokio_core::io::Io;
@@ -376,7 +377,31 @@ impl<'a> Io for &'a UnixStream {
 }
 
 unsafe fn read_ready<B: BufMut>(buf: &mut B, raw_fd: RawFd) -> isize {
-    let mut bufs: [_; 16] = Default::default();
+    // The `IoVec` type can't have a 0-length size, so we create a bunch
+    // of dummy versions on the stack with 1 length which we'll quickly
+    // overwrite.
+    let mut b1: &mut [u8] = &mut [0];
+    let mut b2: &mut [u8] = &mut [0];
+    let mut b3: &mut [u8] = &mut [0];
+    let mut b4: &mut [u8] = &mut [0];
+    let mut b5: &mut [u8] = &mut [0];
+    let mut b6: &mut [u8] = &mut [0];
+    let mut b7: &mut [u8] = &mut [0];
+    let mut b8: &mut [u8] = &mut [0];
+    let mut b9: &mut [u8] = &mut [0];
+    let mut b10: &mut [u8] = &mut [0];
+    let mut b11: &mut [u8] = &mut [0];
+    let mut b12: &mut [u8] = &mut [0];
+    let mut b13: &mut [u8] = &mut [0];
+    let mut b14: &mut [u8] = &mut [0];
+    let mut b15: &mut [u8] = &mut [0];
+    let mut b16: &mut [u8] = &mut [0];
+    let mut bufs: [&mut IoVec; 16] = [
+        b1.into(), b2.into(), b3.into(), b4.into(),
+        b5.into(), b6.into(), b7.into(), b8.into(),
+        b9.into(), b10.into(), b11.into(), b12.into(),
+        b13.into(), b14.into(), b15.into(), b16.into(),
+    ];
 
     let n = buf.bytes_vec_mut(&mut bufs);
     let iovecs = iovec::unix::as_os_slice_mut(&mut bufs[..n]);
@@ -415,7 +440,17 @@ impl<'a> AsyncRead for &'a UnixStream {
 }
 
 unsafe fn write_ready<B: Buf>(buf: &mut B, raw_fd: RawFd) -> isize {
-    let mut bufs: [_; 16] = Default::default();
+    // The `IoVec` type can't have a zero-length size, so create a dummy
+    // version from a 1-length slice which we'll overwrite with the
+    // `bytes_vec` method.
+    static DUMMY: &[u8] = &[0];
+    let iovec = <&IoVec>::from(DUMMY);
+    let mut bufs = [
+        iovec, iovec, iovec, iovec,
+        iovec, iovec, iovec, iovec,
+        iovec, iovec, iovec, iovec,
+        iovec, iovec, iovec, iovec,
+    ];
 
     let n = buf.bytes_vec(&mut bufs);
     let iovecs = iovec::unix::as_os_slice(&bufs[..n]);
