@@ -43,7 +43,10 @@ use tokio_io::{IoStream, AsyncRead, AsyncWrite};
 
 mod frame;
 pub use frame::{UnixDatagramFramed, UnixDatagramCodec};
+
+#[cfg(not(target_os = "android"))]
 mod ucred;
+#[cfg(not(target_os = "android"))]
 pub use ucred::UCred;
 
 fn would_block() -> io::Error {
@@ -283,6 +286,7 @@ impl UnixStream {
         self.io.get_ref().peer_addr()
     }
 
+    #[cfg(not(target_os = "android"))]
     /// Returns effective credentials of the process which called `connect` or `socketpair`.
     pub fn peer_cred(&self) -> io::Result<UCred> {
         ucred::get_peer_cred(self)
