@@ -51,7 +51,7 @@ pub mod impl_linux {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "android"))]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
 pub mod impl_macos {
     use libc::getpeereid;
     use std::{io, mem};
