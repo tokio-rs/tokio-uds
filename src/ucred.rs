@@ -12,7 +12,7 @@ pub struct UCred {
 #[cfg(target_os = "linux")]
 pub use self::impl_linux::get_peer_cred;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
 pub use self::impl_macos::get_peer_cred;
 
 #[cfg(target_os = "linux")]
