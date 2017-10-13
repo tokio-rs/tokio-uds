@@ -1,4 +1,4 @@
-use libc::{uid_t, gid_t};
+use libc::{uid_t, gid_t, pid_t};
 
 /// Credentials of a process
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -7,6 +7,9 @@ pub struct UCred {
     pub uid: uid_t,
     /// GID (group ID) of the process
     pub gid: gid_t,
+    #[cfg(target_os = "linux")]
+    /// PID (process ID) of the process (only available on Linux)
+    pub pid: pid_t,
 }
 
 #[cfg(target_os = "linux")]
@@ -43,6 +46,7 @@ pub mod impl_linux {
                 Ok(super::UCred {
                     uid: ucred.uid,
                     gid: ucred.gid,
+                    pid: ucred.pid,
                 })
             } else {
                 Err(io::Error::last_os_error())
