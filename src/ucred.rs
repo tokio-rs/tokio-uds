@@ -8,8 +8,24 @@ pub struct UCred {
     /// GID (group ID) of the process
     pub gid: gid_t,
     #[cfg(target_os = "linux")]
-    /// PID (process ID) of the process (only available on Linux)
-    pub pid: pid_t,
+    pid: pid_t, // Exposed by the linux::UCredExt trait.
+}
+
+#[cfg(target_os = "linux")]
+pub mod linux {
+	use super::{pid_t, UCred};
+
+	/// Extention trait for Linux, to get the PID out of the UCred structure.
+	pub trait UCredExt {
+		/// Linux only: PID (process ID) of the process
+		fn pid(&self) -> pid_t;
+	}
+
+	impl UCredExt for UCred {
+		fn pid(&self) -> pid_t {
+			self.pid
+		}
+	}
 }
 
 #[cfg(target_os = "linux")]

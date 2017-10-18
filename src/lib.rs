@@ -45,6 +45,8 @@ mod frame;
 pub use frame::{UnixDatagramFramed, UnixDatagramCodec};
 mod ucred;
 pub use ucred::UCred;
+#[cfg(target_os = "linux")]
+pub use ucred::linux;
 
 fn would_block() -> io::Error {
     io::Error::new(io::ErrorKind::WouldBlock, "would block")
