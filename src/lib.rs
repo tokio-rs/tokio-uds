@@ -263,6 +263,28 @@ impl UnixStream {
         Ok(UnixStream { io: io })
     }
 
+    /// Indicates to this source of events that the corresponding I/O object is
+    /// no longer readable, but it needs to be.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if called outside the context of a future's
+    /// task.
+    pub fn need_read(&self) {
+        self.io.need_read()
+    }
+
+    /// Indicates to this source of events that the corresponding I/O object is
+    /// no longer writable, but it needs to be.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if called outside the context of a future's
+    /// task.
+    pub fn need_write(&self) {
+        self.io.need_write()
+    }
+
     /// Test whether this socket is ready to be read or not.
     pub fn poll_read(&self) -> Async<()> {
         self.io.poll_read()
@@ -559,6 +581,28 @@ impl UnixDatagram {
     /// `recv` and `recv_from` will only receive data from that address.
     pub fn connect<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         self.io.get_ref().connect(path)
+    }
+
+    /// Indicates to this source of events that the corresponding I/O object is
+    /// no longer readable, but it needs to be.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if called outside the context of a future's
+    /// task.
+    pub fn need_read(&self) {
+        self.io.need_read()
+    }
+
+    /// Indicates to this source of events that the corresponding I/O object is
+    /// no longer writable, but it needs to be.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if called outside the context of a future's
+    /// task.
+    pub fn need_write(&self) {
+        self.io.need_write()
     }
 
     /// Test whether this socket is ready to be read or not.
