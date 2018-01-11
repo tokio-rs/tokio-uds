@@ -12,7 +12,7 @@ pub struct UCred {
 #[cfg(target_os = "linux")]
 pub use self::impl_linux::get_peer_cred;
 
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+#[cfg(any(target_os = "dragonfly", target_os = "macos", target_os = "ios", target_os = "freebsd"))]
 pub use self::impl_macos::get_peer_cred;
 
 #[cfg(target_os = "linux")]
@@ -51,7 +51,7 @@ pub mod impl_linux {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+#[cfg(any(target_os = "dragonfly", target_os = "macos", target_os = "ios", target_os = "freebsd"))]
 pub mod impl_macos {
     use libc::getpeereid;
     use std::{io, mem};
@@ -75,6 +75,8 @@ pub mod impl_macos {
     }
 }
 
+// Note that SO_PEERCRED is not supported on DragonFly (yet). So do not run tests.
+#[cfg(not(target_os = "dragonfly"))]
 #[cfg(test)]
 mod test {
     use tokio_core::reactor::Core;
