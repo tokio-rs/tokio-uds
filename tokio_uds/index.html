@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="rustdoc">
+    <meta name="description" content="API documentation for the Rust `tokio_uds` crate.">
+    <meta name="keywords" content="rust, rustlang, rust-lang, tokio_uds">
+
+    <title>tokio_uds - Rust</title>
+
+    <link rel="stylesheet" type="text/css" href="../normalize.css">
+    <link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle">
+    
+    <link rel="stylesheet" type="text/css" href="../dark.css">
+    <link rel="stylesheet" type="text/css" href="../main.css" id="themeStyle">
+    <script src="../storage.js"></script>
+    
+
+    
+    
+</head>
+<body class="rustdoc mod">
+    <!--[if lte IE 8]>
+    <div class="warning">
+        This old browser is unsupported and will most likely display funky
+        things.
+    </div>
+    <![endif]-->
+
+    
+
+    <nav class="sidebar">
+        <div class="sidebar-menu">&#9776;</div>
+        
+        <p class='location'>Crate tokio_uds</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#structs">Structs</a></li><li><a href="#traits">Traits</a></li></ul></div><p class='location'></p><script>window.sidebarCurrent = {name: 'tokio_uds', ty: 'mod', relpath: '../'};</script></div>
+    </nav>
+
+    <div class="theme-picker">
+        <button id="theme-picker" aria-label="Pick another theme!">
+            <img src="../brush.svg" width="18" alt="Pick another theme!">
+        </button>
+        <div id="theme-choices"></div>
+    </div>
+    <script src="../theme.js"></script>
+    <nav class="sub">
+        <form class="search-form js-only">
+            <div class="search-container">
+                <input class="search-input" name="search"
+                       autocomplete="off"
+                       placeholder="Click or press ‘S’ to search, ‘?’ for more options…"
+                       type="search">
+            </div>
+        </form>
+    </nav>
+
+    <section id='main' class="content">
+<h1 class='fqn'><span class='in-band'>Crate <a class="mod" href=''>tokio_uds</a></span><span class='out-of-band'><span id='render-detail'>
+                   <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
+                       [<span class='inner'>&#x2212;</span>]
+                   </a>
+               </span><a class='srclink' href='../src/tokio_uds/lib.rs.html#1-875' title='goto source code'>[src]</a></span></h1>
+<div class='docblock'><p>Bindings for Unix Domain Sockets and futures</p>
+<p>This crate provides bindings between <code>mio_uds</code>, the mio crate for Unix
+Domain sockets, and <code>futures</code>. The APIs and bindings in this crate are very
+similar to the TCP and UDP bindings in the <code>futures-mio</code> crate. This crate
+is also an empty crate on Windows, as Unix Domain Sockets are Unix-specific.</p>
+</div><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.RecvDgram.html"
+                                  title='struct tokio_uds::RecvDgram'>RecvDgram</a></td>
+                           <td class='docblock-short'>
+                                <p>A future for receiving datagrams from a Unix datagram socket.</p>
+
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.SendDgram.html"
+                                  title='struct tokio_uds::SendDgram'>SendDgram</a></td>
+                           <td class='docblock-short'>
+                                <p>A future for writing a buffer to a Unix datagram socket.</p>
+
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.UCred.html"
+                                  title='struct tokio_uds::UCred'>UCred</a></td>
+                           <td class='docblock-short'>
+                                <p>Credentials of a process</p>
+
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.UnixDatagram.html"
+                                  title='struct tokio_uds::UnixDatagram'>UnixDatagram</a></td>
+                           <td class='docblock-short'>
+                                <p>An I/O object representing a Unix datagram socket.</p>
+
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.UnixDatagramFramed.html"
+                                  title='struct tokio_uds::UnixDatagramFramed'>UnixDatagramFramed</a></td>
+                           <td class='docblock-short'>
+                                <p>A unified <code>Stream</code> and <code>Sink</code> interface to an underlying
+<code>UnixDatagramSocket</code>, using the <code>UnixDatagramCodec</code> trait to encode and
+decode frames.</p>
+
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.UnixListener.html"
+                                  title='struct tokio_uds::UnixListener'>UnixListener</a></td>
+                           <td class='docblock-short'>
+                                <p>A Unix socket which can accept connections from other unix sockets.</p>
+
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.UnixStream.html"
+                                  title='struct tokio_uds::UnixStream'>UnixStream</a></td>
+                           <td class='docblock-short'>
+                                <p>A structure representing a connected unix socket.</p>
+
+                           </td>
+                       </tr></table><h2 id='traits' class='section-header'><a href="#traits">Traits</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="trait" href="trait.UnixDatagramCodec.html"
+                                  title='trait tokio_uds::UnixDatagramCodec'>UnixDatagramCodec</a></td>
+                           <td class='docblock-short'>
+                                <p>Encoding of frames via buffers.</p>
+
+                           </td>
+                       </tr></table></section>
+    <section id='search' class="content hidden"></section>
+
+    <section class="footer"></section>
+
+    <aside id="help" class="hidden">
+        <div>
+            <h1 class="hidden">Help</h1>
+
+            <div class="shortcuts">
+                <h2>Keyboard Shortcuts</h2>
+
+                <dl>
+                    <dt><kbd>?</kbd></dt>
+                    <dd>Show this help dialog</dd>
+                    <dt><kbd>S</kbd></dt>
+                    <dd>Focus the search field</dd>
+                    <dt><kbd>↑</kbd></dt>
+                    <dd>Move up in search results</dd>
+                    <dt><kbd>↓</kbd></dt>
+                    <dd>Move down in search results</dd>
+                    <dt><kbd>↹</kbd></dt>
+                    <dd>Switch tab</dd>
+                    <dt><kbd>&#9166;</kbd></dt>
+                    <dd>Go to active search result</dd>
+                    <dt><kbd>+</kbd></dt>
+                    <dd>Expand all sections</dd>
+                    <dt><kbd>-</kbd></dt>
+                    <dd>Collapse all sections</dd>
+                </dl>
+            </div>
+
+            <div class="infos">
+                <h2>Search Tricks</h2>
+
+                <p>
+                    Prefix searches with a type followed by a colon (e.g.
+                    <code>fn:</code>) to restrict the search to a given type.
+                </p>
+
+                <p>
+                    Accepted types are: <code>fn</code>, <code>mod</code>,
+                    <code>struct</code>, <code>enum</code>,
+                    <code>trait</code>, <code>type</code>, <code>macro</code>,
+                    and <code>const</code>.
+                </p>
+
+                <p>
+                    Search functions by type signature (e.g.
+                    <code>vec -> usize</code> or <code>* -> vec</code>)
+                </p>
+            </div>
+        </div>
+    </aside>
+
+    
+
+    <script>
+        window.rootPath = "../";
+        window.currentCrate = "tokio_uds";
+    </script>
+    <script src="../main.js"></script>
+    <script defer src="../search-index.js"></script>
+</body>
+</html>
