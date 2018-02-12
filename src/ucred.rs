@@ -17,7 +17,7 @@ pub use self::impl_macos::get_peer_cred;
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod impl_linux {
-    use libc::{getsockopt, SOL_SOCKET, SO_PEERCRED, c_void};
+    use libc::{getsockopt, SOL_SOCKET, SO_PEERCRED, c_void, socklen_t};
     use std::{io, mem};
     use UnixStream;
     use std::os::unix::io::AsRawFd;
@@ -36,7 +36,7 @@ pub mod impl_linux {
             assert!(mem::size_of::<u32>() <= mem::size_of::<usize>());
             assert!(ucred_size <= u32::max_value() as usize);
 
-            let mut ucred_size = ucred_size as u32;
+            let mut ucred_size = ucred_size as socklen_t;
             
             let ret = getsockopt(raw_fd, SOL_SOCKET, SO_PEERCRED, &mut ucred as *mut ucred as *mut c_void, &mut ucred_size);
             if ret == 0 && ucred_size as usize == mem::size_of::<ucred>() {
