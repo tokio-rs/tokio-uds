@@ -9,13 +9,13 @@ pub struct UCred {
     pub gid: gid_t,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub use self::impl_linux::get_peer_cred;
 
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
 pub use self::impl_macos::get_peer_cred;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod impl_linux {
     use libc::{getsockopt, SOL_SOCKET, SO_PEERCRED, c_void};
     use std::{io, mem};
