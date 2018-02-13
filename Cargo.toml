@@ -17,11 +17,15 @@ appveyor = { repository = "alexcrichton/tokio-uds" }
 
 [dependencies]
 bytes = "0.4"
-futures = "0.1.11"
+futures = "0.1"
+futures2 = { version = "0.1.0", optional = true }
 iovec = "0.1"
 libc = "0.2"
 log = "0.4"
-mio = "0.6.5"
+mio = "0.6.14"
 mio-uds = "0.6.4"
-tokio-core = "0.1"
+tokio-reactor = { git = "https://github.com/tokio-rs/tokio", features = ["unstable-futures"] }
 tokio-io = "0.1"
+
+[features]
+unstable-futures = ["futures2"]

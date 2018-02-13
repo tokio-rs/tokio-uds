@@ -4,6 +4,9 @@ use std::path::PathBuf;
 
 use futures::{Async, AsyncSink, Poll, Sink, StartSend, Stream};
 
+#[cfg(feature = "unstable-futures")]
+use futures2::{self, task};
+
 use UnixDatagram;
 
 /// Encoding of frames via buffers.
@@ -72,11 +75,25 @@ impl<C: UnixDatagramCodec> Stream for UnixDatagramFramed<C> {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<C::In>, io::Error> {
-        let (n, addr) = try_nb!(self.socket.recv_from(&mut self.rd));
+        let (n, addr) = try_ready!(self.socket.recv_from(&mut self.rd));
         trace!("received {} bytes, decoding", n);
         let frame = try!(self.codec.decode(&addr, &self.rd[..n]));
         trace!("frame decoded from buffer");
         Ok(Async::Ready(Some(frame)))
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl<C: UnixDatagramCodec> futures2::Stream for UnixDatagramFramed<C> {
+    type Item = C::In;
+    type Error = io::Error;
+
+    fn poll_next(&mut self, cx: &mut task::Context) -> futures2::Poll<Option<C::In>, io::Error> {
+        let (n, addr) = try_ready2!(self.socket.recv_from2(cx, &mut self.rd));
+        trace!("received {} bytes, decoding", n);
+        let frame = try!(self.codec.decode(&addr, &self.rd[..n]));
+        trace!("frame decoded from buffer");
+        Ok(futures2::Async::Ready(Some(frame)))
     }
 }
 
@@ -104,7 +121,7 @@ impl<C: UnixDatagramCodec> Sink for UnixDatagramFramed<C> {
         }
 
         trace!("writing; remaining={}", self.wr.len());
-        let n = try_nb!(self.socket.send_to(&self.wr, &self.out_addr));
+        let n = try_ready!(self.socket.send_to(&self.wr, &self.out_addr));
         trace!("written {}", n);
         let wrote_all = n == self.wr.len();
         self.wr.clear();
@@ -121,6 +138,53 @@ impl<C: UnixDatagramCodec> Sink for UnixDatagramFramed<C> {
     fn close(&mut self) -> Poll<(), io::Error> {
         try_ready!(self.poll_complete());
         Ok(().into())
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl<C: UnixDatagramCodec> futures2::Sink for UnixDatagramFramed<C> {
+    type SinkItem = C::Out;
+    type SinkError = io::Error;
+
+    fn poll_ready(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
+        if self.wr.len() > 0 {
+            try!(self.poll_flush(cx));
+            if self.wr.len() > 0 {
+                return Ok(futures2::Async::Pending);
+            }
+        }
+        Ok(().into())
+    }
+
+    fn start_send(&mut self, item: C::Out) -> Result<(), io::Error> {
+        self.out_addr = try!(self.codec.encode(item, &mut self.wr));
+        Ok(())
+    }
+
+    fn poll_flush(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
+        trace!("flushing framed transport");
+
+        if self.wr.is_empty() {
+            return Ok(futures2::Async::Ready(()));
+        }
+
+        trace!("writing; remaining={}", self.wr.len());
+        let n = try_ready2!(self.socket.send_to2(cx, &self.wr, &self.out_addr));
+        trace!("written {}", n);
+        let wrote_all = n == self.wr.len();
+        self.wr.clear();
+        if wrote_all {
+            Ok(futures2::Async::Ready(()))
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "failed to write entire datagram to socket",
+            ))
+        }
+    }
+
+    fn poll_close(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
+        self.poll_flush(cx)
     }
 }
 
