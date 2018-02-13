@@ -40,7 +40,7 @@ pub mod impl_linux {
             assert!(mem::size_of::<u32>() <= mem::size_of::<usize>());
             assert!(ucred_size <= u32::max_value() as usize);
 
-            let mut ucred_size = ucred_size as u32;
+            let mut ucred_size = ucred_size as socklen_t;
 
             let ret = getsockopt(
                 raw_fd,
@@ -89,14 +89,14 @@ pub mod impl_macos {
 #[cfg(not(target_os = "dragonfly"))]
 #[cfg(test)]
 mod test {
-    use tokio_core::reactor::Core;
+    use tokio_reactor::Reactor;
     use UnixStream;
     use libc::geteuid;
     use libc::getegid;
 
     #[test]
     fn test_socket_pair() {
-        let core = Core::new().unwrap();
+        let core = Reactor::new().unwrap();
         let handle = core.handle();
 
         let (a, b) = UnixStream::pair(&handle).unwrap();
