@@ -14,6 +14,12 @@
 extern crate bytes;
 #[macro_use]
 extern crate futures;
+#[cfg(feature = "unstable-futures")]
+extern crate futures_core as futures2;
+#[cfg(feature = "unstable-futures")]
+extern crate futures_io;
+#[cfg(feature = "unstable-futures")]
+extern crate futures_sink;
 extern crate iovec;
 extern crate libc;
 #[macro_use]
@@ -34,10 +40,23 @@ use std::path::Path;
 
 use bytes::{Buf, BufMut};
 use futures::{Async, Future, Poll, Stream};
+#[cfg(feature = "unstable-futures")]
+use futures2::task;
 use tokio_io::{AsyncRead, AsyncWrite};
 use iovec::IoVec;
 use tokio_reactor::{Handle, PollEvented};
 use mio::Ready;
+
+#[cfg(feature = "unstable-futures")]
+macro_rules! try_ready2 {
+    ($e: expr) => {
+        match $e {
+            Ok($crate::futures2::Async::Ready(t)) => t,
+            Ok($crate::futures2::Async::Pending) => return Ok($crate::futures2::Async::Pending),
+            Err(e) => return Err(From::from(e)),
+        }
+    };
+}
 
 mod frame;
 pub use frame::{UnixDatagramCodec, UnixDatagramFramed};
@@ -55,6 +74,19 @@ impl Stream for Incoming {
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
         Ok(Some(try_nb!(self.inner.accept())).into())
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl futures2::Stream for Incoming {
+    type Item = (UnixStream, SocketAddr);
+    type Error = io::Error;
+
+    fn poll_next(
+        &mut self,
+        cx: &mut task::Context,
+    ) -> futures2::Poll<Option<Self::Item>, io::Error> {
+        Ok(Some(try_ready2!(self.inner.poll_accept2(cx))).into())
     }
 }
 
@@ -114,6 +146,16 @@ impl UnixListener {
         self.io.poll_read_ready(ready)
     }
 
+    /// Test whether this socket is ready to be read or not.
+    #[cfg(feature = "unstable-futures")]
+    pub fn poll_read_ready2(
+        &self,
+        cx: &mut task::Context,
+        ready: Ready,
+    ) -> futures2::Poll<Ready, io::Error> {
+        self.io.poll_read_ready2(cx, ready)
+    }
+
     /// Returns the value of the `SO_ERROR` option.
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
         self.io.get_ref().take_error()
@@ -153,6 +195,54 @@ impl UnixListener {
                     return Ok((UnixStream { io: io }, addr));
                 }
             }
+        }
+    }
+
+    /// Attempt to accept a connection and create a new connected `UnixStream`
+    /// if successful.
+    ///
+    /// This function will attempt an accept operation, but will not block
+    /// waiting for it to complete. If the operation would block then a "would
+    /// block" error is returned. Additionally, if this method would block, it
+    /// registers the current task to receive a notification when it would
+    /// otherwise not block.
+    ///
+    /// Note that typically for simple usage it's easier to treat incoming
+    /// connections as a `Stream` of `UnixStream`s with the `incoming` method
+    /// below.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is called outside the context of a
+    /// future's task. It's recommended to only call this from the
+    /// implementation of a `Future::poll`, if necessary.
+    #[cfg(feature = "unstable-futures")]
+    pub fn poll_accept2(
+        &self,
+        cx: &mut task::Context,
+    ) -> futures2::Poll<(UnixStream, SocketAddr), io::Error> {
+        use futures2::Async;
+
+        let (sock, addr) = try_ready2!(self.poll_accept_mio2(cx));
+
+        let io = try!(PollEvented::new_with_handle(sock, &self.handle));
+        Ok(Async::Ready((UnixStream { io: io }, addr)))
+    }
+
+    #[cfg(feature = "unstable-futures")]
+    fn poll_accept_mio2(
+        &self,
+        cx: &mut task::Context,
+    ) -> futures2::Poll<(mio_uds::UnixStream, SocketAddr), io::Error> {
+        use futures2::Async;
+        try_ready2!(self.io.poll_read_ready2(cx, Ready::readable()));
+
+        match try!(self.io.get_ref().accept()) {
+            None => {
+                self.io.clear_read_ready(Ready::readable())?;
+                Ok(Async::Pending)
+            }
+            Some((sock, addr)) => Ok(Async::Ready((sock, addr))),
         }
     }
 
@@ -255,6 +345,22 @@ impl UnixStream {
         self.io.poll_write_ready()
     }
 
+    /// Test whether this socket is ready to be read or not.
+    #[cfg(feature = "unstable-futures")]
+    pub fn poll_read_ready2(
+        &self,
+        cx: &mut task::Context,
+        ready: Ready,
+    ) -> futures2::Poll<Ready, io::Error> {
+        self.io.poll_read_ready2(cx, ready)
+    }
+
+    /// Test whether this socket is ready to be written to or not.
+    #[cfg(feature = "unstable-futures")]
+    pub fn poll_write_ready2(&self, cx: &mut task::Context) -> futures2::Poll<Ready, io::Error> {
+        self.io.poll_write_ready2(cx)
+    }
+
     /// Returns the socket address of the local half of this connection.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.io.get_ref().local_addr()
@@ -333,6 +439,138 @@ impl<'a> Write for &'a UnixStream {
 
     fn flush(&mut self) -> io::Result<()> {
         (&self.io).flush()
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl futures_io::AsyncRead for UnixStream {
+    fn poll_read(
+        &mut self,
+        cx: &mut task::Context,
+        buf: &mut [u8],
+    ) -> futures2::Poll<usize, io::Error> {
+        futures_io::AsyncRead::poll_read(&mut &*self, cx, buf)
+    }
+
+    fn poll_vectored_read(
+        &mut self,
+        cx: &mut task::Context,
+        vec: &mut [&mut IoVec],
+    ) -> futures2::Poll<usize, io::Error> {
+        futures_io::AsyncRead::poll_vectored_read(&mut &*self, cx, vec)
+    }
+
+    unsafe fn initializer(&self) -> futures_io::Initializer {
+        futures_io::AsyncRead::initializer(&self.io)
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl<'a> futures_io::AsyncRead for &'a UnixStream {
+    fn poll_read(
+        &mut self,
+        cx: &mut task::Context,
+        buf: &mut [u8],
+    ) -> futures2::Poll<usize, io::Error> {
+        futures_io::AsyncRead::poll_read(&mut &self.io, cx, buf)
+    }
+
+    fn poll_vectored_read(
+        &mut self,
+        cx: &mut task::Context,
+        vec: &mut [&mut IoVec],
+    ) -> futures2::Poll<usize, io::Error> {
+        use futures2::Async;
+        try_ready2!(<UnixStream>::poll_read_ready2(self, cx, Ready::readable()));
+        unsafe {
+            let r = read_ready_vecs(vec, self.as_raw_fd());
+            if r == -1 {
+                let e = io::Error::last_os_error();
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    self.io.clear_write_ready()?;
+                    Ok(Async::Pending)
+                } else {
+                    Err(e)
+                }
+            } else {
+                let r = r as usize;
+                Ok(r.into())
+            }
+        }
+    }
+
+    unsafe fn initializer(&self) -> futures_io::Initializer {
+        futures_io::AsyncRead::initializer(&self.io)
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl futures_io::AsyncWrite for UnixStream {
+    fn poll_write(
+        &mut self,
+        cx: &mut task::Context,
+        buf: &[u8],
+    ) -> futures2::Poll<usize, io::Error> {
+        futures_io::AsyncWrite::poll_write(&mut &*self, cx, buf)
+    }
+
+    fn poll_vectored_write(
+        &mut self,
+        cx: &mut task::Context,
+        vec: &[&IoVec],
+    ) -> futures2::Poll<usize, io::Error> {
+        (&*self).poll_vectored_write(cx, vec)
+    }
+
+    fn poll_flush(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
+        futures_io::AsyncWrite::poll_flush(&mut &*self, cx)
+    }
+
+    fn poll_close(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
+        futures_io::AsyncWrite::poll_close(&mut &*self, cx)
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl<'a> futures_io::AsyncWrite for &'a UnixStream {
+    fn poll_write(
+        &mut self,
+        cx: &mut task::Context,
+        buf: &[u8],
+    ) -> futures2::Poll<usize, io::Error> {
+        futures_io::AsyncWrite::poll_write(&mut &self.io, cx, buf)
+    }
+
+    fn poll_vectored_write(
+        &mut self,
+        cx: &mut task::Context,
+        vec: &[&IoVec],
+    ) -> futures2::Poll<usize, io::Error> {
+        use futures2::Async;
+        try_ready2!(<UnixStream>::poll_write_ready2(self, cx));
+        unsafe {
+            let r = write_ready_vecs(vec, self.as_raw_fd());
+            if r == -1 {
+                let e = io::Error::last_os_error();
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    self.io.clear_write_ready()?;
+                    Ok(Async::Pending)
+                } else {
+                    Err(e)
+                }
+            } else {
+                let r = r as usize;
+                Ok(r.into())
+            }
+        }
+    }
+
+    fn poll_flush(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
+        futures_io::AsyncWrite::poll_flush(&mut &self.io, cx)
+    }
+
+    fn poll_close(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
+        futures_io::AsyncWrite::poll_close(&mut &self.io, cx)
     }
 }
 
@@ -585,6 +823,43 @@ impl UnixDatagram {
         r.map(Async::Ready)
     }
 
+    /// Receives data from the socket.
+    ///
+    /// On success, returns the number of bytes read and the address from
+    /// whence the data came.
+    #[cfg(feature = "unstable-futures")]
+    pub fn recv_from2(
+        &self,
+        cx: &mut task::Context,
+        buf: &mut [u8],
+    ) -> futures2::Poll<(usize, SocketAddr), io::Error> {
+        use futures2::Async;
+        try_ready2!(self.io.poll_read_ready2(cx, Ready::readable()));
+        let r = self.io.get_ref().recv_from(buf);
+        if is_wouldblock(&r) {
+            self.io.clear_read_ready2(cx, Ready::readable())?;
+        }
+        r.map(Async::Ready)
+    }
+
+    /// Receives data from the socket.
+    ///
+    /// On success, returns the number of bytes read.
+    #[cfg(feature = "unstable-futures")]
+    pub fn recv2(
+        &self,
+        cx: &mut task::Context,
+        buf: &mut [u8],
+    ) -> futures2::Poll<usize, io::Error> {
+        use futures2::Async;
+        try_ready2!(self.io.poll_read_ready2(cx, Ready::readable()));
+        let r = self.io.get_ref().recv(buf);
+        if is_wouldblock(&r) {
+            self.io.clear_read_ready2(cx, Ready::readable())?;
+        }
+        r.map(Async::Ready)
+    }
+
     /// Returns a future for receiving a datagram. See the documentation on RecvDgram for details.
     pub fn recv_dgram<T>(self, buf: T) -> RecvDgram<T>
     where
@@ -628,6 +903,45 @@ impl UnixDatagram {
         let r = self.io.get_ref().send(buf);
         if is_wouldblock(&r) {
             self.io.clear_write_ready()?;
+        }
+        r.map(Async::Ready)
+    }
+
+    /// Sends data on the socket to the specified address.
+    ///
+    /// On success, returns the number of bytes written.
+    #[cfg(feature = "unstable-futures")]
+    pub fn send_to2<P>(
+        &self,
+        cx: &mut task::Context,
+        buf: &[u8],
+        path: P,
+    ) -> futures2::Poll<usize, io::Error>
+    where
+        P: AsRef<Path>,
+    {
+        use futures2::Async;
+        try_ready2!(self.io.poll_write_ready2(cx));
+        let r = self.io.get_ref().send_to(buf, path);
+        if is_wouldblock(&r) {
+            self.io.clear_write_ready2(cx)?;
+        }
+        r.map(Async::Ready)
+    }
+
+    /// Sends data on the socket to the socket's peer.
+    ///
+    /// The peer address may be set by the `connect` method, and this method
+    /// will return an error if the socket has not already been connected.
+    ///
+    /// On success, returns the number of bytes written.
+    #[cfg(feature = "unstable-futures")]
+    pub fn send2(&self, cx: &mut task::Context, buf: &[u8]) -> futures2::Poll<usize, io::Error> {
+        use futures2::Async;
+        try_ready2!(self.io.poll_write_ready2(cx));
+        let r = self.io.get_ref().send(buf);
+        if is_wouldblock(&r) {
+            self.io.clear_write_ready2(cx)?;
         }
         r.map(Async::Ready)
     }
@@ -763,6 +1077,45 @@ where
     }
 }
 
+#[cfg(feature = "unstable-futures")]
+impl<T, P> futures2::Future for SendDgram<T, P>
+where
+    T: AsRef<[u8]>,
+    P: AsRef<Path>,
+{
+    /// Returns the underlying socket and the buffer that was sent.
+    type Item = (UnixDatagram, T);
+    /// The error that is returned when sending failed.
+    type Error = io::Error;
+
+    fn poll(&mut self, cx: &mut task::Context) -> futures2::Poll<Self::Item, Self::Error> {
+        use futures2::Async;
+        if let SendDgramState::Sending {
+            ref mut sock,
+            ref buf,
+            ref addr,
+        } = self.st
+        {
+            let n = try_ready2!(sock.send_to2(cx, buf.as_ref(), addr));
+            if n < buf.as_ref().len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Couldn't send whole buffer".to_string(),
+                ));
+            }
+        } else {
+            panic!()
+        }
+        if let SendDgramState::Sending { sock, buf, addr: _ } =
+            mem::replace(&mut self.st, SendDgramState::Empty)
+        {
+            Ok(Async::Ready((sock, buf)))
+        } else {
+            panic!()
+        }
+    }
+}
+
 /// A future for receiving datagrams from a Unix datagram socket.
 ///
 /// An example that uses UDP sockets but is still applicable can be found at
@@ -801,6 +1154,49 @@ where
         } = self.st
         {
             let (n, p) = try_ready!(sock.recv_from(buf.as_mut()));
+            received = n;
+
+            peer = p.as_pathname().map_or(String::new(), |p| {
+                p.to_str().map_or(String::new(), |s| s.to_string())
+            });
+        } else {
+            panic!()
+        }
+
+        if let RecvDgramState::Receiving { sock, buf } =
+            mem::replace(&mut self.st, RecvDgramState::Empty)
+        {
+            Ok(Async::Ready((sock, buf, received, peer)))
+        } else {
+            panic!()
+        }
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl<T> futures2::Future for RecvDgram<T>
+where
+    T: AsMut<[u8]>,
+{
+    /// RecvDgram yields a tuple of the underlying socket, the receive buffer, how many bytes were
+    /// received, and the address (path) of the peer sending the datagram. If the buffer is too small, the
+    /// datagram is truncated.
+    type Item = (UnixDatagram, T, usize, String);
+    /// This future yields io::Error if an error occurred.
+    type Error = io::Error;
+
+    fn poll(&mut self, cx: &mut task::Context) -> futures2::Poll<Self::Item, Self::Error> {
+        use futures2::Async;
+
+        let received;
+        let peer;
+
+        if let RecvDgramState::Receiving {
+            ref mut sock,
+            ref mut buf,
+        } = self.st
+        {
+            let (n, p) = try_ready2!(sock.recv_from2(cx, buf.as_mut()));
             received = n;
 
             peer = p.as_pathname().map_or(String::new(), |p| {

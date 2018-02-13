@@ -18,6 +18,7 @@ matrix:
 
 script:
   - cargo test
+  - cargo test --features unstable-futures
 
 env:
   global:
