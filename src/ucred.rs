@@ -1,4 +1,4 @@
-use libc::{uid_t, gid_t};
+use libc::{uid_t, gid_t, pid_t};
 
 /// Credentials of a process
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -7,6 +7,25 @@ pub struct UCred {
     pub uid: uid_t,
     /// GID (group ID) of the process
     pub gid: gid_t,
+    #[cfg(target_os = "linux")]
+    pid: pid_t, // Exposed by the linux::UCredExt trait.
+}
+
+#[cfg(target_os = "linux")]
+pub mod linux {
+	use super::{pid_t, UCred};
+
+	/// Extention trait for Linux, to get the PID out of the UCred structure.
+	pub trait UCredExt {
+		/// Linux only: PID (process ID) of the process
+		fn pid(&self) -> pid_t;
+	}
+
+	impl UCredExt for UCred {
+		fn pid(&self) -> pid_t {
+			self.pid
+		}
+	}
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -43,6 +62,7 @@ pub mod impl_linux {
                 Ok(super::UCred {
                     uid: ucred.uid,
                     gid: ucred.gid,
+                    pid: ucred.pid,
                 })
             } else {
                 Err(io::Error::last_os_error())
