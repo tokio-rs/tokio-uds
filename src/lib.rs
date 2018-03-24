@@ -102,7 +102,15 @@ pub struct UnixListener {
 
 impl UnixListener {
     /// Creates a new `UnixListener` bound to the specified path.
-    pub fn bind<P>(path: P, handle: Handle) -> io::Result<UnixListener>
+    pub fn bind<P>(path: P) -> io::Result<UnixListener>
+    where
+        P: AsRef<Path>,
+    {
+        UnixListener::bind_handle(path.as_ref(), Handle::default())
+    }
+
+    /// Creates a new `UnixListener` bound to the specified path.
+    pub fn bind_handle<P>(path: P, handle: Handle) -> io::Result<UnixListener>
     where
         P: AsRef<Path>,
     {
