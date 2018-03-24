@@ -140,7 +140,7 @@ impl UnixListener {
     /// Test whether this socket is ready to be read or not.
     #[cfg(feature = "unstable-futures")]
     pub fn poll_read_ready2(
-        &mut self,
+        &self,
         cx: &mut task::Context,
         ready: Ready,
     ) -> futures2::Poll<Ready, io::Error> {
@@ -329,7 +329,7 @@ impl UnixStream {
     /// Test whether this socket is ready to be read or not.
     #[cfg(feature = "unstable-futures")]
     pub fn poll_read_ready2(
-        &mut self,
+        &self,
         cx: &mut task::Context,
         ready: Ready,
     ) -> futures2::Poll<Ready, io::Error> {
@@ -338,10 +338,7 @@ impl UnixStream {
 
     /// Test whether this socket is ready to be written to or not.
     #[cfg(feature = "unstable-futures")]
-    pub fn poll_write_ready2(
-        &mut self,
-        cx: &mut task::Context,
-    ) -> futures2::Poll<Ready, io::Error> {
+    pub fn poll_write_ready2(&self, cx: &mut task::Context) -> futures2::Poll<Ready, io::Error> {
         self.io.poll_write_ready2(cx)
     }
 
@@ -433,7 +430,30 @@ impl futures2::io::AsyncRead for UnixStream {
         cx: &mut task::Context,
         buf: &mut [u8],
     ) -> futures2::Poll<usize, io::Error> {
-        self.io.poll_read(cx, buf)
+        futures2::io::AsyncRead::poll_read(&mut &*self, cx, buf)
+    }
+
+    fn poll_vectored_read(
+        &mut self,
+        cx: &mut task::Context,
+        vec: &mut [&mut IoVec],
+    ) -> futures2::Poll<usize, io::Error> {
+        futures2::io::AsyncRead::poll_vectored_read(&mut &*self, cx, vec)
+    }
+
+    unsafe fn initializer(&self) -> futures2::io::Initializer {
+        futures2::io::AsyncRead::initializer(&self.io)
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl<'a> futures2::io::AsyncRead for &'a UnixStream {
+    fn poll_read(
+        &mut self,
+        cx: &mut task::Context,
+        buf: &mut [u8],
+    ) -> futures2::Poll<usize, io::Error> {
+        (&self.io).poll_read(cx, buf)
     }
 
     fn poll_vectored_read(
@@ -472,7 +492,34 @@ impl futures2::io::AsyncWrite for UnixStream {
         cx: &mut task::Context,
         buf: &[u8],
     ) -> futures2::Poll<usize, io::Error> {
-        self.io.poll_write(cx, buf)
+        (&self.io).poll_write(cx, buf)
+    }
+
+    fn poll_vectored_write(
+        &mut self,
+        cx: &mut task::Context,
+        vec: &[&IoVec],
+    ) -> futures2::Poll<usize, io::Error> {
+        (&*self).poll_vectored_write(cx, vec)
+    }
+
+    fn poll_flush(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
+        (&self.io).poll_flush(cx)
+    }
+
+    fn poll_close(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
+        (&self.io).poll_close(cx)
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl<'a> futures2::io::AsyncWrite for &'a UnixStream {
+    fn poll_write(
+        &mut self,
+        cx: &mut task::Context,
+        buf: &[u8],
+    ) -> futures2::Poll<usize, io::Error> {
+        (&self.io).poll_write(cx, buf)
     }
 
     fn poll_vectored_write(
@@ -500,11 +547,11 @@ impl futures2::io::AsyncWrite for UnixStream {
     }
 
     fn poll_flush(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
-        self.io.poll_flush(cx)
+        (&self.io).poll_flush(cx)
     }
 
     fn poll_close(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
-        self.io.poll_close(cx)
+        (&self.io).poll_close(cx)
     }
 }
 
