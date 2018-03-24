@@ -138,6 +138,11 @@ impl UnixListener {
     }
 
     /// Test whether this socket is ready to be read or not.
+    pub fn poll_read_ready(&self, ready: Ready) -> Poll<Ready, io::Error> {
+        self.io.poll_read_ready(ready)
+    }
+
+    /// Test whether this socket is ready to be read or not.
     #[cfg(feature = "unstable-futures")]
     pub fn poll_read_ready2(
         &self,
