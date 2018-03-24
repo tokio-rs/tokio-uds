@@ -436,6 +436,30 @@ impl futures2::io::AsyncRead for UnixStream {
         self.io.poll_read(cx, buf)
     }
 
+    fn poll_vectored_read(
+        &mut self,
+        cx: &mut task::Context,
+        vec: &mut [&mut IoVec],
+    ) -> futures2::Poll<usize, io::Error> {
+        use futures2::Async;
+        try_ready2!(<UnixStream>::poll_read_ready2(self, cx, Ready::readable()));
+        unsafe {
+            let r = read_ready_vecs(vec, self.as_raw_fd());
+            if r == -1 {
+                let e = io::Error::last_os_error();
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    self.io.clear_write_ready()?;
+                    Ok(Async::Pending)
+                } else {
+                    Err(e)
+                }
+            } else {
+                let r = r as usize;
+                Ok(r.into())
+            }
+        }
+    }
+
     unsafe fn initializer(&self) -> futures2::io::Initializer {
         futures2::io::AsyncRead::initializer(&self.io)
     }
@@ -449,6 +473,30 @@ impl futures2::io::AsyncWrite for UnixStream {
         buf: &[u8],
     ) -> futures2::Poll<usize, io::Error> {
         self.io.poll_write(cx, buf)
+    }
+
+    fn poll_vectored_write(
+        &mut self,
+        cx: &mut task::Context,
+        vec: &[&IoVec],
+    ) -> futures2::Poll<usize, io::Error> {
+        use futures2::Async;
+        try_ready2!(<UnixStream>::poll_write_ready2(self, cx));
+        unsafe {
+            let r = write_ready_vecs(vec, self.as_raw_fd());
+            if r == -1 {
+                let e = io::Error::last_os_error();
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    self.io.clear_write_ready()?;
+                    Ok(Async::Pending)
+                } else {
+                    Err(e)
+                }
+            } else {
+                let r = r as usize;
+                Ok(r.into())
+            }
+        }
     }
 
     fn poll_flush(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
@@ -500,7 +548,11 @@ unsafe fn read_ready<B: BufMut>(buf: &mut B, raw_fd: RawFd) -> isize {
     ];
 
     let n = buf.bytes_vec_mut(&mut bufs);
-    let iovecs = iovec::unix::as_os_slice_mut(&mut bufs[..n]);
+    read_ready_vecs(&mut bufs[..n], raw_fd)
+}
+
+unsafe fn read_ready_vecs(bufs: &mut [&mut IoVec], raw_fd: RawFd) -> isize {
+    let iovecs = iovec::unix::as_os_slice_mut(bufs);
 
     libc::readv(raw_fd, iovecs.as_ptr(), iovecs.len() as i32)
 }
@@ -545,7 +597,11 @@ unsafe fn write_ready<B: Buf>(buf: &mut B, raw_fd: RawFd) -> isize {
     ];
 
     let n = buf.bytes_vec(&mut bufs);
-    let iovecs = iovec::unix::as_os_slice(&bufs[..n]);
+    write_ready_vecs(&bufs[..n], raw_fd)
+}
+
+unsafe fn write_ready_vecs(bufs: &[&IoVec], raw_fd: RawFd) -> isize {
+    let iovecs = iovec::unix::as_os_slice(bufs);
 
     libc::writev(raw_fd, iovecs.as_ptr(), iovecs.len() as i32)
 }
