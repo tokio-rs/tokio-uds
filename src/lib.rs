@@ -15,7 +15,11 @@ extern crate bytes;
 #[macro_use]
 extern crate futures;
 #[cfg(feature = "unstable-futures")]
-extern crate futures2;
+extern crate futures_core as futures2;
+#[cfg(feature = "unstable-futures")]
+extern crate futures_io;
+#[cfg(feature = "unstable-futures")]
+extern crate futures_sink;
 extern crate iovec;
 extern crate libc;
 #[macro_use]
@@ -437,13 +441,13 @@ impl<'a> Write for &'a UnixStream {
 }
 
 #[cfg(feature = "unstable-futures")]
-impl futures2::io::AsyncRead for UnixStream {
+impl futures_io::AsyncRead for UnixStream {
     fn poll_read(
         &mut self,
         cx: &mut task::Context,
         buf: &mut [u8],
     ) -> futures2::Poll<usize, io::Error> {
-        futures2::io::AsyncRead::poll_read(&mut &*self, cx, buf)
+        futures_io::AsyncRead::poll_read(&mut &*self, cx, buf)
     }
 
     fn poll_vectored_read(
@@ -451,22 +455,22 @@ impl futures2::io::AsyncRead for UnixStream {
         cx: &mut task::Context,
         vec: &mut [&mut IoVec],
     ) -> futures2::Poll<usize, io::Error> {
-        futures2::io::AsyncRead::poll_vectored_read(&mut &*self, cx, vec)
+        futures_io::AsyncRead::poll_vectored_read(&mut &*self, cx, vec)
     }
 
-    unsafe fn initializer(&self) -> futures2::io::Initializer {
-        futures2::io::AsyncRead::initializer(&self.io)
+    unsafe fn initializer(&self) -> futures_io::Initializer {
+        futures_io::AsyncRead::initializer(&self.io)
     }
 }
 
 #[cfg(feature = "unstable-futures")]
-impl<'a> futures2::io::AsyncRead for &'a UnixStream {
+impl<'a> futures_io::AsyncRead for &'a UnixStream {
     fn poll_read(
         &mut self,
         cx: &mut task::Context,
         buf: &mut [u8],
     ) -> futures2::Poll<usize, io::Error> {
-        (&self.io).poll_read(cx, buf)
+        futures_io::AsyncRead::poll_read(&mut &self.io, cx, buf)
     }
 
     fn poll_vectored_read(
@@ -493,19 +497,19 @@ impl<'a> futures2::io::AsyncRead for &'a UnixStream {
         }
     }
 
-    unsafe fn initializer(&self) -> futures2::io::Initializer {
-        futures2::io::AsyncRead::initializer(&self.io)
+    unsafe fn initializer(&self) -> futures_io::Initializer {
+        futures_io::AsyncRead::initializer(&self.io)
     }
 }
 
 #[cfg(feature = "unstable-futures")]
-impl futures2::io::AsyncWrite for UnixStream {
+impl futures_io::AsyncWrite for UnixStream {
     fn poll_write(
         &mut self,
         cx: &mut task::Context,
         buf: &[u8],
     ) -> futures2::Poll<usize, io::Error> {
-        (&self.io).poll_write(cx, buf)
+        futures_io::AsyncWrite::poll_write(&mut &*self, cx, buf)
     }
 
     fn poll_vectored_write(
@@ -517,22 +521,22 @@ impl futures2::io::AsyncWrite for UnixStream {
     }
 
     fn poll_flush(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
-        (&self.io).poll_flush(cx)
+        futures_io::AsyncWrite::poll_flush(&mut &*self, cx)
     }
 
     fn poll_close(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
-        (&self.io).poll_close(cx)
+        futures_io::AsyncWrite::poll_close(&mut &*self, cx)
     }
 }
 
 #[cfg(feature = "unstable-futures")]
-impl<'a> futures2::io::AsyncWrite for &'a UnixStream {
+impl<'a> futures_io::AsyncWrite for &'a UnixStream {
     fn poll_write(
         &mut self,
         cx: &mut task::Context,
         buf: &[u8],
     ) -> futures2::Poll<usize, io::Error> {
-        (&self.io).poll_write(cx, buf)
+        futures_io::AsyncWrite::poll_write(&mut &self.io, cx, buf)
     }
 
     fn poll_vectored_write(
@@ -560,11 +564,11 @@ impl<'a> futures2::io::AsyncWrite for &'a UnixStream {
     }
 
     fn poll_flush(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
-        (&self.io).poll_flush(cx)
+        futures_io::AsyncWrite::poll_flush(&mut &self.io, cx)
     }
 
     fn poll_close(&mut self, cx: &mut task::Context) -> futures2::Poll<(), io::Error> {
-        (&self.io).poll_close(cx)
+        futures_io::AsyncWrite::poll_close(&mut &self.io, cx)
     }
 }
 

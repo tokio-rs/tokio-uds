@@ -6,6 +6,8 @@ use futures::{Async, AsyncSink, Poll, Sink, StartSend, Stream};
 
 #[cfg(feature = "unstable-futures")]
 use futures2::{self, task};
+#[cfg(feature = "unstable-futures")]
+use futures_sink;
 
 use UnixDatagram;
 
@@ -142,7 +144,7 @@ impl<C: UnixDatagramCodec> Sink for UnixDatagramFramed<C> {
 }
 
 #[cfg(feature = "unstable-futures")]
-impl<C: UnixDatagramCodec> futures2::Sink for UnixDatagramFramed<C> {
+impl<C: UnixDatagramCodec> futures_sink::Sink for UnixDatagramFramed<C> {
     type SinkItem = C::Out;
     type SinkError = io::Error;
 
