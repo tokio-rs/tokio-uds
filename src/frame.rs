@@ -2,7 +2,7 @@ use std::io;
 use std::os::unix::net::SocketAddr;
 use std::path::PathBuf;
 
-use futures::{Async, Poll, Stream, Sink, StartSend, AsyncSink};
+use futures::{Async, AsyncSink, Poll, Sink, StartSend, Stream};
 
 use UnixDatagram;
 
@@ -50,8 +50,7 @@ pub trait UnixDatagramCodec {
     ///
     /// The encode method also determines the destination to which the buffer
     /// should be directed, which will be returned as a `SocketAddr`.
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>)
-              -> io::Result<PathBuf>;
+    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> io::Result<PathBuf>;
 }
 
 /// A unified `Stream` and `Sink` interface to an underlying
@@ -101,7 +100,7 @@ impl<C: UnixDatagramCodec> Sink for UnixDatagramFramed<C> {
         trace!("flushing framed transport");
 
         if self.wr.is_empty() {
-            return Ok(Async::Ready(()))
+            return Ok(Async::Ready(()));
         }
 
         trace!("writing; remaining={}", self.wr.len());
@@ -112,8 +111,10 @@ impl<C: UnixDatagramCodec> Sink for UnixDatagramFramed<C> {
         if wrote_all {
             Ok(Async::Ready(()))
         } else {
-            Err(io::Error::new(io::ErrorKind::Other,
-                               "failed to write entire datagram to socket"))
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "failed to write entire datagram to socket",
+            ))
         }
     }
 

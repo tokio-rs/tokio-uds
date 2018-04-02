@@ -17,12 +17,12 @@ extern crate futures;
 extern crate iovec;
 extern crate libc;
 #[macro_use]
-extern crate tokio_core;
-extern crate tokio_io;
+extern crate log;
 extern crate mio;
 extern crate mio_uds;
 #[macro_use]
-extern crate log;
+extern crate tokio_core;
+extern crate tokio_io;
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -33,16 +33,16 @@ use std::os::unix::prelude::*;
 use std::path::Path;
 
 use bytes::{Buf, BufMut};
-use futures::{Future, Poll, Async, Stream};
+use futures::{Async, Future, Poll, Stream};
 use futures::sync::oneshot;
 use iovec::IoVec;
-use tokio_core::reactor::{PollEvented, Handle};
+use tokio_core::reactor::{Handle, PollEvented};
 #[allow(deprecated)]
 use tokio_core::io::Io;
-use tokio_io::{IoStream, AsyncRead, AsyncWrite};
+use tokio_io::{AsyncRead, AsyncWrite, IoStream};
 
 mod frame;
-pub use frame::{UnixDatagramFramed, UnixDatagramCodec};
+pub use frame::{UnixDatagramCodec, UnixDatagramFramed};
 mod ucred;
 pub use ucred::UCred;
 
@@ -59,7 +59,8 @@ pub struct UnixListener {
 impl UnixListener {
     /// Creates a new `UnixListener` bound to the specified path.
     pub fn bind<P>(path: P, handle: &Handle) -> io::Result<UnixListener>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         UnixListener::_bind(path.as_ref(), handle)
     }
@@ -69,8 +70,7 @@ impl UnixListener {
     ///
     /// The returned listener will be associated with the given event loop
     /// specified by `handle` and is ready to perform I/O.
-    pub fn from_listener(listener: net::UnixListener, handle: &Handle)
-                         -> io::Result<UnixListener> {
+    pub fn from_listener(listener: net::UnixListener, handle: &Handle) -> io::Result<UnixListener> {
         let s = try!(mio_uds::UnixListener::from_listener(listener));
         UnixListener::new(s, handle)
     }
@@ -80,8 +80,7 @@ impl UnixListener {
         UnixListener::new(s, handle)
     }
 
-    fn new(listener: mio_uds::UnixListener,
-           handle: &Handle) -> io::Result<UnixListener> {
+    fn new(listener: mio_uds::UnixListener, handle: &Handle) -> io::Result<UnixListener> {
         let io = try!(PollEvented::new(listener, handle));
         Ok(UnixListener {
             io: io,
@@ -128,27 +127,26 @@ impl UnixListener {
                 match pending.poll().expect("shouldn't be canceled") {
                     Async::NotReady => {
                         self.pending_accept = Some(pending);
-                        return Err(would_block())
-                    },
+                        return Err(would_block());
+                    }
                     Async::Ready(r) => return r,
                 }
             }
 
             if let Async::NotReady = self.io.poll_read() {
-                return Err(io::Error::new(io::ErrorKind::WouldBlock, "not ready"))
+                return Err(io::Error::new(io::ErrorKind::WouldBlock, "not ready"));
             }
 
             match try!(self.io.get_ref().accept()) {
                 None => {
                     self.io.need_read();
-                    return Err(io::Error::new(io::ErrorKind::WouldBlock,
-                                              "not ready"))
+                    return Err(io::Error::new(io::ErrorKind::WouldBlock, "not ready"));
                 }
                 Some((sock, addr)) => {
                     // Fast path if we haven't left the event loop
                     if let Some(handle) = self.io.remote().handle() {
                         let io = try!(PollEvented::new(sock, &handle));
-                        return Ok((UnixStream { io: io }, addr))
+                        return Ok((UnixStream { io: io }, addr));
                     }
 
                     // If we're off the event loop then send the socket back
@@ -158,9 +156,7 @@ impl UnixListener {
                     let remote = self.io.remote().clone();
                     remote.spawn(move |handle| {
                         let res = PollEvented::new(sock, handle)
-                            .map(move |io| {
-                                (UnixStream { io: io }, addr)
-                            });
+                            .map(move |io| (UnixStream { io: io }, addr));
                         drop(tx.send(res));
                         Ok(())
                     });
@@ -170,7 +166,6 @@ impl UnixListener {
             }
         }
     }
-
 
     /// Consumes this listener, returning a stream of the sockets this listener
     /// accepts.
@@ -223,7 +218,8 @@ impl UnixStream {
     /// specified, performing associating the returned stream with the provided
     /// event loop's handle.
     pub fn connect<P>(p: P, handle: &Handle) -> io::Result<UnixStream>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         UnixStream::_connect(p.as_ref(), handle)
     }
@@ -238,8 +234,7 @@ impl UnixStream {
     ///
     /// The returned stream will be associated with the given event loop
     /// specified by `handle` and is ready to perform I/O.
-    pub fn from_stream(stream: net::UnixStream, handle: &Handle)
-                       -> io::Result<UnixStream> {
+    pub fn from_stream(stream: net::UnixStream, handle: &Handle) -> io::Result<UnixStream> {
         let s = try!(mio_uds::UnixStream::from_stream(stream));
         UnixStream::new(s, handle)
     }
@@ -257,8 +252,7 @@ impl UnixStream {
         Ok((a, b))
     }
 
-    fn new(stream: mio_uds::UnixStream, handle: &Handle)
-           -> io::Result<UnixStream> {
+    fn new(stream: mio_uds::UnixStream, handle: &Handle) -> io::Result<UnixStream> {
         let io = try!(PollEvented::new(stream, handle));
         Ok(UnixStream { io: io })
     }
@@ -419,18 +413,28 @@ unsafe fn read_ready<B: BufMut>(buf: &mut B, raw_fd: RawFd) -> isize {
     let b15: &mut [u8] = &mut [0];
     let b16: &mut [u8] = &mut [0];
     let mut bufs: [&mut IoVec; 16] = [
-        b1.into(), b2.into(), b3.into(), b4.into(),
-        b5.into(), b6.into(), b7.into(), b8.into(),
-        b9.into(), b10.into(), b11.into(), b12.into(),
-        b13.into(), b14.into(), b15.into(), b16.into(),
+        b1.into(),
+        b2.into(),
+        b3.into(),
+        b4.into(),
+        b5.into(),
+        b6.into(),
+        b7.into(),
+        b8.into(),
+        b9.into(),
+        b10.into(),
+        b11.into(),
+        b12.into(),
+        b13.into(),
+        b14.into(),
+        b15.into(),
+        b16.into(),
     ];
 
     let n = buf.bytes_vec_mut(&mut bufs);
     let iovecs = iovec::unix::as_os_slice_mut(&mut bufs[..n]);
 
-    libc::readv(raw_fd,
-                iovecs.as_ptr(),
-                iovecs.len() as i32)
+    libc::readv(raw_fd, iovecs.as_ptr(), iovecs.len() as i32)
 }
 
 impl<'a> AsyncRead for &'a UnixStream {
@@ -440,7 +444,7 @@ impl<'a> AsyncRead for &'a UnixStream {
 
     fn read_buf<B: BufMut>(&mut self, buf: &mut B) -> Poll<usize, io::Error> {
         if let Async::NotReady = <UnixStream>::poll_read(self) {
-            return Ok(Async::NotReady)
+            return Ok(Async::NotReady);
         }
         unsafe {
             let r = read_ready(buf, self.as_raw_fd());
@@ -468,18 +472,14 @@ unsafe fn write_ready<B: Buf>(buf: &mut B, raw_fd: RawFd) -> isize {
     static DUMMY: &[u8] = &[0];
     let iovec = <&IoVec>::from(DUMMY);
     let mut bufs = [
-        iovec, iovec, iovec, iovec,
-        iovec, iovec, iovec, iovec,
-        iovec, iovec, iovec, iovec,
-        iovec, iovec, iovec, iovec,
+        iovec, iovec, iovec, iovec, iovec, iovec, iovec, iovec, iovec, iovec, iovec, iovec, iovec,
+        iovec, iovec, iovec,
     ];
 
     let n = buf.bytes_vec(&mut bufs);
     let iovecs = iovec::unix::as_os_slice(&bufs[..n]);
 
-    libc::writev(raw_fd,
-                iovecs.as_ptr(),
-                iovecs.len() as i32)
+    libc::writev(raw_fd, iovecs.as_ptr(), iovecs.len() as i32)
 }
 
 impl<'a> AsyncWrite for &'a UnixStream {
@@ -489,7 +489,7 @@ impl<'a> AsyncWrite for &'a UnixStream {
 
     fn write_buf<B: Buf>(&mut self, buf: &mut B) -> Poll<usize, io::Error> {
         if let Async::NotReady = <UnixStream>::poll_write(self) {
-            return Ok(Async::NotReady)
+            return Ok(Async::NotReady);
         }
         unsafe {
             let r = write_ready(buf, self.as_raw_fd());
@@ -530,7 +530,8 @@ pub struct UnixDatagram {
 impl UnixDatagram {
     /// Creates a new `UnixDatagram` bound to the specified path.
     pub fn bind<P>(path: P, handle: &Handle) -> io::Result<UnixDatagram>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         UnixDatagram::_bind(path.as_ref(), handle)
     }
@@ -557,14 +558,12 @@ impl UnixDatagram {
     ///
     /// The returned datagram will be associated with the given event loop
     /// specified by `handle` and is ready to perform I/O.
-    pub fn from_datagram(datagram: net::UnixDatagram, handle: &Handle)
-                       -> io::Result<UnixDatagram> {
+    pub fn from_datagram(datagram: net::UnixDatagram, handle: &Handle) -> io::Result<UnixDatagram> {
         let s = try!(mio_uds::UnixDatagram::from_datagram(datagram));
         UnixDatagram::new(s, handle)
     }
 
-    fn new(socket: mio_uds::UnixDatagram, handle: &Handle)
-           -> io::Result<UnixDatagram> {
+    fn new(socket: mio_uds::UnixDatagram, handle: &Handle) -> io::Result<UnixDatagram> {
         let io = try!(PollEvented::new(socket, handle));
         Ok(UnixDatagram { io: io })
     }
@@ -633,13 +632,13 @@ impl UnixDatagram {
     /// whence the data came.
     pub fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
         if self.io.poll_read().is_not_ready() {
-            return Err(would_block())
+            return Err(would_block());
         }
         let r = self.io.get_ref().recv_from(buf);
         if is_wouldblock(&r) {
             self.io.need_read();
         }
-        return r
+        return r;
     }
 
     /// Receives data from the socket.
@@ -647,18 +646,19 @@ impl UnixDatagram {
     /// On success, returns the number of bytes read.
     pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
         if self.io.poll_read().is_not_ready() {
-            return Err(would_block())
+            return Err(would_block());
         }
         let r = self.io.get_ref().recv(buf);
         if is_wouldblock(&r) {
             self.io.need_read();
         }
-        return r
+        return r;
     }
 
     /// Returns a future for receiving a datagram. See the documentation on RecvDgram for details.
     pub fn recv_dgram<T>(self, buf: T) -> RecvDgram<T>
-        where T: AsMut<[u8]>
+    where
+        T: AsMut<[u8]>,
     {
         RecvDgram {
             st: RecvDgramState::Receiving {
@@ -672,16 +672,17 @@ impl UnixDatagram {
     ///
     /// On success, returns the number of bytes written.
     pub fn send_to<P>(&self, buf: &[u8], path: P) -> io::Result<usize>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         if self.io.poll_write().is_not_ready() {
-            return Err(would_block())
+            return Err(would_block());
         }
         let r = self.io.get_ref().send_to(buf, path);
         if is_wouldblock(&r) {
             self.io.need_write();
         }
-        return r
+        return r;
     }
 
     /// Sends data on the socket to the socket's peer.
@@ -692,20 +693,20 @@ impl UnixDatagram {
     /// On success, returns the number of bytes written.
     pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
         if self.io.poll_write().is_not_ready() {
-            return Err(would_block())
+            return Err(would_block());
         }
         let r = self.io.get_ref().send(buf);
         if is_wouldblock(&r) {
             self.io.need_write();
         }
-        return r
+        return r;
     }
-
 
     /// Returns a future sending the data in buf to the socket at path.
     pub fn send_dgram<T, P>(self, buf: T, path: P) -> SendDgram<T, P>
-        where T: AsRef<[u8]>,
-              P: AsRef<Path>
+    where
+        T: AsRef<[u8]>,
+        P: AsRef<Path>,
     {
         SendDgram {
             st: SendDgramState::Sending {
@@ -750,7 +751,8 @@ impl UnixDatagram {
     /// which will break them into separate objects, allowing them to interact
     /// more easily.
     pub fn framed<C>(self, codec: C) -> UnixDatagramFramed<C>
-        where C: UnixDatagramCodec,
+    where
+        C: UnixDatagramCodec,
     {
         frame::new(self, codec)
     }
@@ -795,8 +797,9 @@ enum SendDgramState<T, P> {
 }
 
 impl<T, P> Future for SendDgram<T, P>
-    where T: AsRef<[u8]>,
-          P: AsRef<Path>
+where
+    T: AsRef<[u8]>,
+    P: AsRef<Path>,
 {
     /// Returns the underlying socket and the buffer that was sent.
     type Item = (UnixDatagram, T);
@@ -804,17 +807,25 @@ impl<T, P> Future for SendDgram<T, P>
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        if let SendDgramState::Sending { ref sock, ref buf, ref addr } = self.st {
+        if let SendDgramState::Sending {
+            ref sock,
+            ref buf,
+            ref addr,
+        } = self.st
+        {
             let n = try_nb!(sock.send_to(buf.as_ref(), addr));
             if n < buf.as_ref().len() {
-                return Err(io::Error::new(io::ErrorKind::Other,
-                                          "Couldn't send whole buffer".to_string()));
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Couldn't send whole buffer".to_string(),
+                ));
             }
         } else {
             panic!()
         }
         if let SendDgramState::Sending { sock, buf, addr: _ } =
-               mem::replace(&mut self.st, SendDgramState::Empty) {
+            mem::replace(&mut self.st, SendDgramState::Empty)
+        {
             Ok(Async::Ready((sock, buf)))
         } else {
             panic!()
@@ -836,12 +847,16 @@ pub struct RecvDgram<T> {
 /// avoided.
 enum RecvDgramState<T> {
     #[allow(dead_code)]
-    Receiving { sock: UnixDatagram, buf: T },
+    Receiving {
+        sock: UnixDatagram,
+        buf: T,
+    },
     Empty,
 }
 
 impl<T> Future for RecvDgram<T>
-    where T: AsMut<[u8]>
+where
+    T: AsMut<[u8]>,
 {
     /// RecvDgram yields a tuple of the underlying socket, the receive buffer, how many bytes were
     /// received, and the address (path) of the peer sending the datagram. If the buffer is too small, the
@@ -854,19 +869,24 @@ impl<T> Future for RecvDgram<T>
         let received;
         let peer;
 
-        if let RecvDgramState::Receiving { ref sock, ref mut buf } = self.st {
+        if let RecvDgramState::Receiving {
+            ref sock,
+            ref mut buf,
+        } = self.st
+        {
             let (n, p) = try_nb!(sock.recv_from(buf.as_mut()));
             received = n;
 
-            peer = p.as_pathname().map_or(String::new(),
-                                          |p| p.to_str().map_or(String::new(), |s| s.to_string()));
-
+            peer = p.as_pathname().map_or(String::new(), |p| {
+                p.to_str().map_or(String::new(), |s| s.to_string())
+            });
         } else {
             panic!()
         }
 
-        if let RecvDgramState::Receiving { sock, buf } = mem::replace(&mut self.st,
-                                                                      RecvDgramState::Empty) {
+        if let RecvDgramState::Receiving { sock, buf } =
+            mem::replace(&mut self.st, RecvDgramState::Empty)
+        {
             Ok(Async::Ready((sock, buf, received, peer)))
         } else {
             panic!()
