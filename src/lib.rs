@@ -126,7 +126,7 @@ impl UnixListener {
     ///
     /// The returned listener will be associated with the given event loop
     /// specified by `handle` and is ready to perform I/O.
-    pub fn from_listener(listener: net::UnixListener, handle: Handle) -> io::Result<UnixListener> {
+    pub fn from_std(listener: net::UnixListener, handle: Handle) -> io::Result<UnixListener> {
         let s = try!(mio_uds::UnixListener::from_listener(listener));
         UnixListener::new(s, handle)
     }
@@ -187,7 +187,7 @@ impl UnixListener {
     /// This function will panic if it is called outside the context of a
     /// future's task. It's recommended to only call this from the
     /// implementation of a `Future::poll`, if necessary.
-    pub fn accept(&mut self) -> io::Result<(UnixStream, SocketAddr)> {
+    pub fn accept(&self) -> io::Result<(UnixStream, SocketAddr)> {
         loop {
             if let Async::NotReady = self.io.poll_read_ready(Ready::readable())? {
                 return Err(io::Error::new(io::ErrorKind::WouldBlock, "not ready"));
@@ -226,9 +226,22 @@ impl UnixListener {
     /// implementation of a `Future::poll`, if necessary.
     #[cfg(feature = "unstable-futures")]
     pub fn poll_accept2(
-        &mut self,
+        &self,
         cx: &mut task::Context,
     ) -> futures2::Poll<(UnixStream, SocketAddr), io::Error> {
+        use futures2::Async;
+
+        let (sock, addr) = try_ready2!(self.poll_accept_mio2(cx));
+
+        let io = try!(PollEvented::new_with_handle(sock, &self.handle));
+        Ok(Async::Ready((UnixStream { io: io }, addr)))
+    }
+
+    #[cfg(feature = "unstable-futures")]
+    fn poll_accept_mio2(
+        &self,
+        cx: &mut task::Context,
+    ) -> futures2::Poll<(mio_uds::UnixStream, SocketAddr), io::Error> {
         use futures2::Async;
         try_ready2!(self.io.poll_read_ready2(cx, Ready::readable()));
 
@@ -237,10 +250,7 @@ impl UnixListener {
                 self.io.clear_read_ready(Ready::readable())?;
                 Ok(Async::Pending)
             }
-            Some((sock, addr)) => {
-                let io = try!(PollEvented::new_with_handle(sock, &self.handle));
-                Ok(Async::Ready((UnixStream { io: io }, addr)))
-            }
+            Some((sock, addr)) => Ok(Async::Ready((sock, addr))),
         }
     }
 
@@ -310,7 +320,7 @@ impl UnixStream {
     ///
     /// The returned stream will be associated with the given event loop
     /// specified by `handle` and is ready to perform I/O.
-    pub fn from_stream(stream: net::UnixStream, handle: &Handle) -> io::Result<UnixStream> {
+    pub fn from_std(stream: net::UnixStream, handle: &Handle) -> io::Result<UnixStream> {
         let s = try!(mio_uds::UnixStream::from_stream(stream));
         UnixStream::new(s, handle)
     }
@@ -796,7 +806,7 @@ impl UnixDatagram {
     ///
     /// On success, returns the number of bytes read and the address from
     /// whence the data came.
-    pub fn recv_from(&mut self, buf: &mut [u8]) -> Poll<(usize, SocketAddr), io::Error> {
+    pub fn recv_from(&self, buf: &mut [u8]) -> Poll<(usize, SocketAddr), io::Error> {
         if self.io.poll_read_ready(Ready::readable())?.is_not_ready() {
             return Ok(Async::NotReady);
         }
@@ -810,7 +820,7 @@ impl UnixDatagram {
     /// Receives data from the socket.
     ///
     /// On success, returns the number of bytes read.
-    pub fn recv(&mut self, buf: &mut [u8]) -> Poll<usize, io::Error> {
+    pub fn recv(&self, buf: &mut [u8]) -> Poll<usize, io::Error> {
         if self.io.poll_read_ready(Ready::readable())?.is_not_ready() {
             return Ok(Async::NotReady);
         }
@@ -827,7 +837,7 @@ impl UnixDatagram {
     /// whence the data came.
     #[cfg(feature = "unstable-futures")]
     pub fn recv_from2(
-        &mut self,
+        &self,
         cx: &mut task::Context,
         buf: &mut [u8],
     ) -> futures2::Poll<(usize, SocketAddr), io::Error> {
@@ -845,7 +855,7 @@ impl UnixDatagram {
     /// On success, returns the number of bytes read.
     #[cfg(feature = "unstable-futures")]
     pub fn recv2(
-        &mut self,
+        &self,
         cx: &mut task::Context,
         buf: &mut [u8],
     ) -> futures2::Poll<usize, io::Error> {
@@ -874,7 +884,7 @@ impl UnixDatagram {
     /// Sends data on the socket to the specified address.
     ///
     /// On success, returns the number of bytes written.
-    pub fn send_to<P>(&mut self, buf: &[u8], path: P) -> Poll<usize, io::Error>
+    pub fn send_to<P>(&self, buf: &[u8], path: P) -> Poll<usize, io::Error>
     where
         P: AsRef<Path>,
     {
@@ -894,7 +904,7 @@ impl UnixDatagram {
     /// will return an error if the socket has not already been connected.
     ///
     /// On success, returns the number of bytes written.
-    pub fn send(&mut self, buf: &[u8]) -> Poll<usize, io::Error> {
+    pub fn send(&self, buf: &[u8]) -> Poll<usize, io::Error> {
         if self.io.poll_write_ready()?.is_not_ready() {
             return Ok(Async::NotReady);
         }
@@ -910,7 +920,7 @@ impl UnixDatagram {
     /// On success, returns the number of bytes written.
     #[cfg(feature = "unstable-futures")]
     pub fn send_to2<P>(
-        &mut self,
+        &self,
         cx: &mut task::Context,
         buf: &[u8],
         path: P,
@@ -934,11 +944,7 @@ impl UnixDatagram {
     ///
     /// On success, returns the number of bytes written.
     #[cfg(feature = "unstable-futures")]
-    pub fn send2(
-        &mut self,
-        cx: &mut task::Context,
-        buf: &[u8],
-    ) -> futures2::Poll<usize, io::Error> {
+    pub fn send2(&self, cx: &mut task::Context, buf: &[u8]) -> futures2::Poll<usize, io::Error> {
         use futures2::Async;
         try_ready2!(self.io.poll_write_ready2(cx));
         let r = self.io.get_ref().send(buf);
