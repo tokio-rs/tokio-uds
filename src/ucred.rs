@@ -12,7 +12,7 @@ pub struct UCred {
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use self::impl_linux::get_peer_cred;
 
-#[cfg(any(target_os = "dragonfly", target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+#[cfg(any(target_os = "dragonfly", target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd"))]
 pub use self::impl_macos::get_peer_cred;
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -51,7 +51,7 @@ pub mod impl_linux {
     }
 }
 
-#[cfg(any(target_os = "dragonfly", target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+#[cfg(any(target_os = "dragonfly", target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd"))]
 pub mod impl_macos {
     use libc::getpeereid;
     use std::{io, mem};
