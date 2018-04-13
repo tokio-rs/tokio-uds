@@ -71,6 +71,14 @@ fn lift_async<T>(old: futures::Async<T>) -> futures2::Async<T> {
     }
 }
 
+#[cfg(feature = "unstable-futures")]
+fn lower_async<T>(new: futures2::Async<T>) -> futures::Async<T> {
+    match new {
+        futures2::Async::Ready(x) => futures::Async::Ready(x),
+        futures2::Async::Pending => futures::Async::NotReady,
+    }
+}
+
 /// Stream of listeners
 pub struct Incoming {
     inner: UnixListener,
@@ -276,6 +284,21 @@ impl AsRawFd for UnixListener {
     }
 }
 
+/// Future returned by `UnixStream::connect` which will resolve to a `UnixStream`
+/// when the stream is connected.
+#[must_use = "futures do nothing unless polled"]
+#[derive(Debug)]
+pub struct ConnectFuture {
+    inner: ConnectFutureState,
+}
+
+#[derive(Debug)]
+enum ConnectFutureState {
+    Waiting(UnixStream),
+    Error(io::Error),
+    Empty,
+}
+
 /// A structure representing a connected unix socket.
 ///
 /// This socket can be connected directly with `UnixStream::connect` or accepted
@@ -291,7 +314,7 @@ impl UnixStream {
     /// This function will create a new unix socket and connect to the path
     /// specified, associating the returned stream with the default event loop's
     /// handle.
-    pub fn connect<P>(p: P) -> io::Result<UnixStream>
+    pub fn connect<P>(p: P) -> ConnectFuture
     where
         P: AsRef<Path>,
     {
@@ -303,16 +326,18 @@ impl UnixStream {
     /// This function will create a new unix socket and connect to the path
     /// specified, associating the returned stream with the provided
     /// event loop's handle.
-    pub fn connect_handle<P>(p: P, handle: &Handle) -> io::Result<UnixStream>
+    pub fn connect_handle<P>(p: P, handle: &Handle) -> ConnectFuture
     where
         P: AsRef<Path>,
     {
-        UnixStream::_connect(p.as_ref(), handle)
-    }
+        let inner = match mio_uds::UnixStream::connect(p.as_ref())
+            .and_then(|s| UnixStream::new(s, handle))
+        {
+            Ok(s) => ConnectFutureState::Waiting(s),
+            Err(e) => ConnectFutureState::Error(e),
+        };
 
-    fn _connect(path: &Path, handle: &Handle) -> io::Result<UnixStream> {
-        let s = try!(mio_uds::UnixStream::connect(path));
-        UnixStream::new(s, handle)
+        ConnectFuture { inner }
     }
 
     /// Consumes a `UnixStream` in the standard library and returns a
@@ -717,6 +742,59 @@ impl fmt::Debug for UnixStream {
 impl AsRawFd for UnixStream {
     fn as_raw_fd(&self) -> RawFd {
         self.io.get_ref().as_raw_fd()
+    }
+}
+
+impl Future for ConnectFuture {
+    type Item = UnixStream;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<UnixStream, io::Error> {
+        self.inner.poll_inner(|io| io.poll_write_ready())
+    }
+}
+
+#[cfg(feature = "unstable-futures")]
+impl futures2::Future for ConnectFuture {
+    type Item = UnixStream;
+    type Error = io::Error;
+
+    fn poll(&mut self, cx: &mut futures2::task::Context) -> futures2::Poll<UnixStream, io::Error> {
+        self.inner.poll_inner(|io| io.poll_write_ready2(cx).map(lower_async))
+            .map(lift_async)
+    }
+}
+
+impl ConnectFutureState {
+    fn poll_inner<F>(&mut self, f: F) -> Poll<UnixStream, io::Error>
+        where F: FnOnce(&mut PollEvented<mio_uds::UnixStream>) -> Poll<mio::Ready, io::Error>
+    {
+        {
+            let stream = match *self {
+                ConnectFutureState::Waiting(ref mut s) => s,
+                ConnectFutureState::Error(_) => {
+                    let e = match mem::replace(self, ConnectFutureState::Empty) {
+                        ConnectFutureState::Error(e) => e,
+                        _ => unreachable!(),
+                    };
+                    return Err(e)
+                },
+                ConnectFutureState::Empty => panic!("can't poll stream twice"),
+            };
+
+            if let Async::NotReady = f(&mut stream.io)? {
+                return Ok(Async::NotReady)
+            }
+
+            if let Some(e) = try!(stream.io.get_ref().take_error()) {
+                return Err(e)
+            }
+        }
+
+        match mem::replace(self, ConnectFutureState::Empty) {
+            ConnectFutureState::Waiting(stream) => Ok(Async::Ready(stream)),
+            _ => unreachable!(),
+        }
     }
 }
 
