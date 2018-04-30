@@ -126,6 +126,36 @@ impl UnixListener {
     /// future's task. It's recommended to only call this from the
     /// implementation of a `Future::poll`, if necessary.
     pub fn poll_accept(&self) -> Poll<(UnixStream, SocketAddr), io::Error> {
+        let (io, addr) = try_ready!(self.poll_accept_std());
+
+        let io = PollEvented::new(io);
+        Ok((UnixStream { io: io }, addr).into())
+    }
+
+    /// Attempt to accept a connection and create a new connected `UnixStream`
+    /// if successful.
+    ///
+    /// This function is the same as `poll_accept` above except that it returns a
+    /// `mio_uds::UnixStream` instead of a `tokio_udp::UnixStream`. This in turn
+    /// can then allow for the stream to be associated with a different reactor
+    /// than the one this `UnixListener` is associated with.
+    ///
+    /// This function will attempt an accept operation, but will not block
+    /// waiting for it to complete. If the operation would block then a "would
+    /// block" error is returned. Additionally, if this method would block, it
+    /// registers the current task to receive a notification when it would
+    /// otherwise not block.
+    ///
+    /// Note that typically for simple usage it's easier to treat incoming
+    /// connections as a `Stream` of `UnixStream`s with the `incoming` method
+    /// below.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is called outside the context of a
+    /// future's task. It's recommended to only call this from the
+    /// implementation of a `Future::poll`, if necessary.
+    pub fn poll_accept_std(&self) -> Poll<(mio_uds::UnixStream, SocketAddr), io::Error> {
         loop {
             try_ready!(self.io.poll_read_ready(Ready::readable()));
 
@@ -135,8 +165,7 @@ impl UnixListener {
                     return Ok(Async::NotReady);
                 }
                 Some((sock, addr)) => {
-                    let io = PollEvented::new(sock);
-                    return Ok(Async::Ready((UnixStream { io: io }, addr)));
+                    return Ok(Async::Ready((sock, addr)));
                 }
             }
         }
