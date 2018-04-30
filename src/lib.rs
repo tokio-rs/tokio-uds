@@ -20,7 +20,6 @@ extern crate libc;
 extern crate log;
 extern crate mio;
 extern crate mio_uds;
-#[macro_use]
 extern crate tokio_io;
 extern crate tokio_reactor;
 
@@ -54,14 +53,13 @@ impl Stream for Incoming {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
-        Ok(Some(try_nb!(self.inner.accept())).into())
+        Ok(Some(try_ready!(self.inner.poll_accept())).into())
     }
 }
 
 /// A Unix socket which can accept connections from other unix sockets.
 pub struct UnixListener {
     io: PollEvented<mio_uds::UnixListener>,
-    handle: Handle,
 }
 
 impl UnixListener {
@@ -70,15 +68,8 @@ impl UnixListener {
     where
         P: AsRef<Path>,
     {
-        UnixListener::bind_handle(path.as_ref(), Handle::default())
-    }
-
-    /// Creates a new `UnixListener` bound to the specified path.
-    pub fn bind_handle<P>(path: P, handle: Handle) -> io::Result<UnixListener>
-    where
-        P: AsRef<Path>,
-    {
-        UnixListener::_bind(path.as_ref(), handle)
+        let handle = Handle::default();
+        UnixListener::_bind(path.as_ref(), &handle)
     }
 
     /// Consumes a `UnixListener` in the standard library and returns a
@@ -86,22 +77,19 @@ impl UnixListener {
     ///
     /// The returned listener will be associated with the given event loop
     /// specified by `handle` and is ready to perform I/O.
-    pub fn from_std(listener: net::UnixListener, handle: Handle) -> io::Result<UnixListener> {
+    pub fn from_std(listener: net::UnixListener, handle: &Handle) -> io::Result<UnixListener> {
         let s = try!(mio_uds::UnixListener::from_listener(listener));
         UnixListener::new(s, handle)
     }
 
-    fn _bind(path: &Path, handle: Handle) -> io::Result<UnixListener> {
+    fn _bind(path: &Path, handle: &Handle) -> io::Result<UnixListener> {
         let s = try!(mio_uds::UnixListener::bind(path));
         UnixListener::new(s, handle)
     }
 
-    fn new(listener: mio_uds::UnixListener, handle: Handle) -> io::Result<UnixListener> {
-        let io = try!(PollEvented::new_with_handle(listener, &handle));
-        Ok(UnixListener {
-            io: io,
-            handle: handle,
-        })
+    fn new(listener: mio_uds::UnixListener, handle: &Handle) -> io::Result<UnixListener> {
+        let io = try!(PollEvented::new_with_handle(listener, handle));
+        Ok(UnixListener { io: io })
     }
 
     /// Returns the local socket address of this listener.
@@ -137,20 +125,18 @@ impl UnixListener {
     /// This function will panic if it is called outside the context of a
     /// future's task. It's recommended to only call this from the
     /// implementation of a `Future::poll`, if necessary.
-    pub fn accept(&self) -> io::Result<(UnixStream, SocketAddr)> {
+    pub fn poll_accept(&self) -> Poll<(UnixStream, SocketAddr), io::Error> {
         loop {
-            if let Async::NotReady = self.io.poll_read_ready(Ready::readable())? {
-                return Err(io::Error::new(io::ErrorKind::WouldBlock, "not ready"));
-            }
+            try_ready!(self.io.poll_read_ready(Ready::readable()));
 
             match try!(self.io.get_ref().accept()) {
                 None => {
                     self.io.clear_read_ready(Ready::readable())?;
-                    return Err(io::Error::new(io::ErrorKind::WouldBlock, "not ready"));
+                    return Ok(Async::NotReady);
                 }
                 Some((sock, addr)) => {
-                    let io = try!(PollEvented::new_with_handle(sock, &self.handle));
-                    return Ok((UnixStream { io: io }, addr));
+                    let io = PollEvented::new(sock);
+                    return Ok(Async::Ready((UnixStream { io: io }, addr)));
                 }
             }
         }
@@ -197,19 +183,8 @@ impl UnixStream {
     where
         P: AsRef<Path>,
     {
-        UnixStream::connect_handle(p.as_ref(), &Handle::default())
-    }
-
-    /// Connects to the socket named by `path`.
-    ///
-    /// This function will create a new unix socket and connect to the path
-    /// specified, associating the returned stream with the provided
-    /// event loop's handle.
-    pub fn connect_handle<P>(p: P, handle: &Handle) -> io::Result<UnixStream>
-    where
-        P: AsRef<Path>,
-    {
-        UnixStream::_connect(p.as_ref(), handle)
+        let handle = Handle::default();
+        UnixStream::_connect(p.as_ref(), &handle)
     }
 
     fn _connect(path: &Path, handle: &Handle) -> io::Result<UnixStream> {
@@ -510,7 +485,7 @@ impl UnixDatagram {
     ///
     /// The returned datagram will be associated with the given event loop
     /// specified by `handle` and is ready to perform I/O.
-    pub fn from_datagram(datagram: net::UnixDatagram, handle: &Handle) -> io::Result<UnixDatagram> {
+    pub fn from_std(datagram: net::UnixDatagram, handle: &Handle) -> io::Result<UnixDatagram> {
         let s = try!(mio_uds::UnixDatagram::from_datagram(datagram));
         UnixDatagram::new(s, handle)
     }
@@ -560,7 +535,7 @@ impl UnixDatagram {
     ///
     /// On success, returns the number of bytes read and the address from
     /// whence the data came.
-    pub fn recv_from(&self, buf: &mut [u8]) -> Poll<(usize, SocketAddr), io::Error> {
+    pub fn poll_recv_from(&self, buf: &mut [u8]) -> Poll<(usize, SocketAddr), io::Error> {
         if self.io.poll_read_ready(Ready::readable())?.is_not_ready() {
             return Ok(Async::NotReady);
         }
@@ -574,7 +549,7 @@ impl UnixDatagram {
     /// Receives data from the socket.
     ///
     /// On success, returns the number of bytes read.
-    pub fn recv(&self, buf: &mut [u8]) -> Poll<usize, io::Error> {
+    pub fn poll_recv(&self, buf: &mut [u8]) -> Poll<usize, io::Error> {
         if self.io.poll_read_ready(Ready::readable())?.is_not_ready() {
             return Ok(Async::NotReady);
         }
@@ -601,7 +576,7 @@ impl UnixDatagram {
     /// Sends data on the socket to the specified address.
     ///
     /// On success, returns the number of bytes written.
-    pub fn send_to<P>(&self, buf: &[u8], path: P) -> Poll<usize, io::Error>
+    pub fn poll_send_to<P>(&self, buf: &[u8], path: P) -> Poll<usize, io::Error>
     where
         P: AsRef<Path>,
     {
@@ -621,7 +596,7 @@ impl UnixDatagram {
     /// will return an error if the socket has not already been connected.
     ///
     /// On success, returns the number of bytes written.
-    pub fn send(&self, buf: &[u8]) -> Poll<usize, io::Error> {
+    pub fn poll_send(&self, buf: &[u8]) -> Poll<usize, io::Error> {
         if self.io.poll_write_ready()?.is_not_ready() {
             return Ok(Async::NotReady);
         }
@@ -743,7 +718,7 @@ where
             ref addr,
         } = self.st
         {
-            let n = try_ready!(sock.send_to(buf.as_ref(), addr));
+            let n = try_ready!(sock.poll_send_to(buf.as_ref(), addr));
             if n < buf.as_ref().len() {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
@@ -800,7 +775,7 @@ where
             ref mut buf,
         } = self.st
         {
-            let (n, p) = try_ready!(sock.recv_from(buf.as_mut()));
+            let (n, p) = try_ready!(sock.poll_recv_from(buf.as_mut()));
             received = n;
 
             peer = p.as_pathname().map_or(String::new(), |p| {

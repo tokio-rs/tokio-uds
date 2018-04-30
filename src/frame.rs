@@ -72,7 +72,7 @@ impl<C: UnixDatagramCodec> Stream for UnixDatagramFramed<C> {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<C::In>, io::Error> {
-        let (n, addr) = try_ready!(self.socket.recv_from(&mut self.rd));
+        let (n, addr) = try_ready!(self.socket.poll_recv_from(&mut self.rd));
         trace!("received {} bytes, decoding", n);
         let frame = try!(self.codec.decode(&addr, &self.rd[..n]));
         trace!("frame decoded from buffer");
@@ -104,7 +104,7 @@ impl<C: UnixDatagramCodec> Sink for UnixDatagramFramed<C> {
         }
 
         trace!("writing; remaining={}", self.wr.len());
-        let n = try_ready!(self.socket.send_to(&self.wr, &self.out_addr));
+        let n = try_ready!(self.socket.poll_send_to(&self.wr, &self.out_addr));
         trace!("written {}", n);
         let wrote_all = n == self.wr.len();
         self.wr.clear();
