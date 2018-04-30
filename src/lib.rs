@@ -159,14 +159,19 @@ impl UnixListener {
         loop {
             try_ready!(self.io.poll_read_ready(Ready::readable()));
 
-            match try!(self.io.get_ref().accept()) {
-                None => {
+            match self.io.get_ref().accept() {
+                Ok(None) => {
                     self.io.clear_read_ready(Ready::readable())?;
                     return Ok(Async::NotReady);
                 }
-                Some((sock, addr)) => {
+                Ok(Some((sock, addr))) => {
                     return Ok(Async::Ready((sock, addr)));
                 }
+                Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {
+                    self.io.clear_read_ready(Ready::readable())?;
+                    return Ok(Async::NotReady);
+                }
+                Err(err) => return Err(err),
             }
         }
     }
