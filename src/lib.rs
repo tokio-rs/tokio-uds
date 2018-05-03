@@ -128,6 +128,7 @@ impl UnixListener {
     pub fn poll_accept(&self) -> Poll<(UnixStream, SocketAddr), io::Error> {
         let (io, addr) = try_ready!(self.poll_accept_std());
 
+        let io = mio_uds::UnixStream::from_stream(io)?;
         let io = PollEvented::new(io);
         Ok((UnixStream { io: io }, addr).into())
     }
@@ -155,11 +156,11 @@ impl UnixListener {
     /// This function will panic if it is called outside the context of a
     /// future's task. It's recommended to only call this from the
     /// implementation of a `Future::poll`, if necessary.
-    pub fn poll_accept_std(&self) -> Poll<(mio_uds::UnixStream, SocketAddr), io::Error> {
+    pub fn poll_accept_std(&self) -> Poll<(net::UnixStream, SocketAddr), io::Error> {
         loop {
             try_ready!(self.io.poll_read_ready(Ready::readable()));
 
-            match self.io.get_ref().accept() {
+            match self.io.get_ref().accept_std() {
                 Ok(None) => {
                     self.io.clear_read_ready(Ready::readable())?;
                     return Ok(Async::NotReady);
@@ -785,7 +786,11 @@ pub struct RecvDgram<T> {
 /// This can be used if the peer's address is of no interest, so the allocation overhead can be
 /// avoided.
 enum RecvDgramState<T> {
-    #[allow(dead_code)] Receiving { sock: UnixDatagram, buf: T },
+    #[allow(dead_code)]
+    Receiving {
+        sock: UnixDatagram,
+        buf: T,
+    },
     Empty,
 }
 
