@@ -129,12 +129,7 @@ impl UnixDatagram {
     where
         T: AsMut<[u8]>,
     {
-        RecvDgram {
-            st: ::RecvDgramState::Receiving {
-                sock: self,
-                buf: buf,
-            },
-        }
+        RecvDgram::new(self, buf)
     }
 
     /// Sends data on the socket to the specified address.
