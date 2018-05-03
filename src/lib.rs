@@ -46,11 +46,11 @@ pub struct Incoming {
 }
 
 impl Stream for Incoming {
-    type Item = (UnixStream, SocketAddr);
+    type Item = UnixStream;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
-        Ok(Some(try_ready!(self.inner.poll_accept())).into())
+        Ok(Some(try_ready!(self.inner.poll_accept()).0).into())
     }
 }
 
