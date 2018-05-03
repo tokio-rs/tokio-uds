@@ -2,7 +2,7 @@ use std::io;
 use std::os::unix::net::SocketAddr;
 use std::path::PathBuf;
 
-use futures::{Async, Poll, Stream, Sink, StartSend, AsyncSink};
+use futures::{Async, AsyncSink, Poll, Sink, StartSend, Stream};
 
 use UnixDatagram;
 
@@ -50,8 +50,7 @@ pub trait UnixDatagramCodec {
     ///
     /// The encode method also determines the destination to which the buffer
     /// should be directed, which will be returned as a `SocketAddr`.
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>)
-              -> io::Result<PathBuf>;
+    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> io::Result<PathBuf>;
 }
 
 /// A unified `Stream` and `Sink` interface to an underlying
@@ -73,7 +72,7 @@ impl<C: UnixDatagramCodec> Stream for UnixDatagramFramed<C> {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<C::In>, io::Error> {
-        let (n, addr) = try_nb!(self.socket.recv_from(&mut self.rd));
+        let (n, addr) = try_ready!(self.socket.poll_recv_from(&mut self.rd));
         trace!("received {} bytes, decoding", n);
         let frame = try!(self.codec.decode(&addr, &self.rd[..n]));
         trace!("frame decoded from buffer");
@@ -101,19 +100,21 @@ impl<C: UnixDatagramCodec> Sink for UnixDatagramFramed<C> {
         trace!("flushing framed transport");
 
         if self.wr.is_empty() {
-            return Ok(Async::Ready(()))
+            return Ok(Async::Ready(()));
         }
 
         trace!("writing; remaining={}", self.wr.len());
-        let n = try_nb!(self.socket.send_to(&self.wr, &self.out_addr));
+        let n = try_ready!(self.socket.poll_send_to(&self.wr, &self.out_addr));
         trace!("written {}", n);
         let wrote_all = n == self.wr.len();
         self.wr.clear();
         if wrote_all {
             Ok(Async::Ready(()))
         } else {
-            Err(io::Error::new(io::ErrorKind::Other,
-                               "failed to write entire datagram to socket"))
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "failed to write entire datagram to socket",
+            ))
         }
     }
 
