@@ -9,6 +9,7 @@
 
 #![cfg(unix)]
 #![doc(html_root_url = "https://docs.rs/tokio-uds/0.1")]
+#![deny(missing_docs, warnings, missing_debug_implementations)]
 
 extern crate bytes;
 #[macro_use]

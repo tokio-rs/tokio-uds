@@ -5,6 +5,7 @@ use futures::{Stream, Poll};
 use std::io;
 
 /// Stream of listeners
+#[derive(Debug)]
 pub struct Incoming {
     inner: UnixListener,
 }

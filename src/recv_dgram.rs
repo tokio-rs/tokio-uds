@@ -9,6 +9,7 @@ use std::mem;
 ///
 /// An example that uses UDP sockets but is still applicable can be found at
 /// https://gist.github.com/dermesser/e331094c2ab28fc7f6ba8a16183fe4d5.
+#[derive(Debug)]
 pub struct RecvDgram<T> {
     st: State<T>,
 }
@@ -17,6 +18,7 @@ pub struct RecvDgram<T> {
 ///
 /// This can be used if the peer's address is of no interest, so the allocation overhead can be
 /// avoided.
+#[derive(Debug)]
 enum State<T> {
     Receiving {
         sock: UnixDatagram,

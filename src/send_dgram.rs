@@ -7,10 +7,12 @@ use std::mem;
 use std::path::Path;
 
 /// A future for writing a buffer to a Unix datagram socket.
+#[derive(Debug)]
 pub struct SendDgram<T, P> {
     st: State<T, P>,
 }
 
+#[derive(Debug)]
 enum State<T, P> {
     /// current state is Sending
     Sending {
