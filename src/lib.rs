@@ -22,6 +22,12 @@ extern crate mio_uds;
 extern crate tokio_io;
 extern crate tokio_reactor;
 
+mod incoming;
+mod ucred;
+
+pub use incoming::Incoming;
+pub use ucred::UCred;
+
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::mem;
@@ -31,28 +37,11 @@ use std::os::unix::prelude::*;
 use std::path::Path;
 
 use bytes::{Buf, BufMut};
-use futures::{Async, Future, Poll, Stream};
+use futures::{Async, Future, Poll};
 use tokio_io::{AsyncRead, AsyncWrite};
 use iovec::IoVec;
 use tokio_reactor::{Handle, PollEvented};
 use mio::Ready;
-
-mod ucred;
-pub use ucred::UCred;
-
-/// Stream of listeners
-pub struct Incoming {
-    inner: UnixListener,
-}
-
-impl Stream for Incoming {
-    type Item = UnixStream;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
-        Ok(Some(try_ready!(self.inner.poll_accept()).0).into())
-    }
-}
 
 /// A Unix socket which can accept connections from other unix sockets.
 pub struct UnixListener {
@@ -180,7 +169,7 @@ impl UnixListener {
     /// This method returns an implementation of the `Stream` trait which
     /// resolves to the sockets the are accepted on this listener.
     pub fn incoming(self) -> Incoming {
-        Incoming { inner: self }
+        Incoming::new(self)
     }
 }
 
