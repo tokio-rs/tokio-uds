@@ -20,16 +20,12 @@ pub struct UnixDatagram {
 
 impl UnixDatagram {
     /// Creates a new `UnixDatagram` bound to the specified path.
-    pub fn bind<P>(path: P, handle: &Handle) -> io::Result<UnixDatagram>
+    pub fn bind<P>(path: P) -> io::Result<UnixDatagram>
     where
         P: AsRef<Path>,
     {
-        UnixDatagram::_bind(path.as_ref(), handle)
-    }
-
-    fn _bind(path: &Path, handle: &Handle) -> io::Result<UnixDatagram> {
-        let s = try!(mio_uds::UnixDatagram::bind(path));
-        UnixDatagram::new(s, handle)
+        let socket = mio_uds::UnixDatagram::bind(path)?;
+        Ok(UnixDatagram::new(socket))
     }
 
     /// Creates an unnamed pair of connected sockets.
@@ -37,10 +33,11 @@ impl UnixDatagram {
     /// This function will create a pair of interconnected unix sockets for
     /// communicating back and forth between one another. Each socket will be
     /// associated with the event loop whose handle is also provided.
-    pub fn pair(handle: &Handle) -> io::Result<(UnixDatagram, UnixDatagram)> {
-        let (a, b) = try!(mio_uds::UnixDatagram::pair());
-        let a = try!(UnixDatagram::new(a, handle));
-        let b = try!(UnixDatagram::new(b, handle));
+    pub fn pair() -> io::Result<(UnixDatagram, UnixDatagram)> {
+        let (a, b) = mio_uds::UnixDatagram::pair()?;
+        let a = UnixDatagram::new(a);
+        let b = UnixDatagram::new(b);
+
         Ok((a, b))
     }
 
@@ -50,19 +47,20 @@ impl UnixDatagram {
     /// The returned datagram will be associated with the given event loop
     /// specified by `handle` and is ready to perform I/O.
     pub fn from_std(datagram: net::UnixDatagram, handle: &Handle) -> io::Result<UnixDatagram> {
-        let s = try!(mio_uds::UnixDatagram::from_datagram(datagram));
-        UnixDatagram::new(s, handle)
+        let socket = mio_uds::UnixDatagram::from_datagram(datagram)?;
+        let io = PollEvented::new_with_handle(socket, handle)?;
+        Ok(UnixDatagram { io })
     }
 
-    fn new(socket: mio_uds::UnixDatagram, handle: &Handle) -> io::Result<UnixDatagram> {
-        let io = try!(PollEvented::new_with_handle(socket, handle));
-        Ok(UnixDatagram { io: io })
+    fn new(socket: mio_uds::UnixDatagram) -> UnixDatagram {
+        let io = PollEvented::new(socket);
+        UnixDatagram { io }
     }
 
     /// Creates a new `UnixDatagram` which is not bound to any address.
-    pub fn unbound(handle: &Handle) -> io::Result<UnixDatagram> {
-        let s = try!(mio_uds::UnixDatagram::unbound());
-        UnixDatagram::new(s, handle)
+    pub fn unbound() -> io::Result<UnixDatagram> {
+        let socket = mio_uds::UnixDatagram::unbound()?;
+        Ok(UnixDatagram::new(socket))
     }
 
     /// Connects the socket to the specified address.

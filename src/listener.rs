@@ -23,8 +23,9 @@ impl UnixListener {
     where
         P: AsRef<Path>,
     {
-        let handle = Handle::default();
-        UnixListener::_bind(path.as_ref(), &handle)
+        let listener = mio_uds::UnixListener::bind(path)?;
+        let io = PollEvented::new(listener);
+        Ok(UnixListener { io })
     }
 
     /// Consumes a `UnixListener` in the standard library and returns a
@@ -33,18 +34,9 @@ impl UnixListener {
     /// The returned listener will be associated with the given event loop
     /// specified by `handle` and is ready to perform I/O.
     pub fn from_std(listener: net::UnixListener, handle: &Handle) -> io::Result<UnixListener> {
-        let s = try!(mio_uds::UnixListener::from_listener(listener));
-        UnixListener::new(s, handle)
-    }
-
-    fn _bind(path: &Path, handle: &Handle) -> io::Result<UnixListener> {
-        let s = try!(mio_uds::UnixListener::bind(path));
-        UnixListener::new(s, handle)
-    }
-
-    fn new(listener: mio_uds::UnixListener, handle: &Handle) -> io::Result<UnixListener> {
-        let io = try!(PollEvented::new_with_handle(listener, handle));
-        Ok(UnixListener { io: io })
+        let listener = mio_uds::UnixListener::from_listener(listener)?;
+        let io = PollEvented::new_with_handle(listener, handle)?;
+        Ok(UnixListener { io })
     }
 
     /// Returns the local socket address of this listener.

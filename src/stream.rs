@@ -33,17 +33,12 @@ impl UnixStream {
     /// This function will create a new unix socket and connect to the path
     /// specified, associating the returned stream with the default event loop's
     /// handle.
-    pub fn connect<P>(p: P) -> io::Result<UnixStream>
+    pub fn connect<P>(path: P) -> io::Result<UnixStream>
     where
         P: AsRef<Path>,
     {
-        let handle = Handle::default();
-        UnixStream::_connect(p.as_ref(), &handle)
-    }
-
-    fn _connect(path: &Path, handle: &Handle) -> io::Result<UnixStream> {
-        let s = try!(mio_uds::UnixStream::connect(path));
-        UnixStream::new(s, handle)
+        let stream = mio_uds::UnixStream::connect(path)?;
+        Ok(UnixStream::new(stream))
     }
 
     /// Consumes a `UnixStream` in the standard library and returns a
@@ -52,8 +47,10 @@ impl UnixStream {
     /// The returned stream will be associated with the given event loop
     /// specified by `handle` and is ready to perform I/O.
     pub fn from_std(stream: net::UnixStream, handle: &Handle) -> io::Result<UnixStream> {
-        let s = try!(mio_uds::UnixStream::from_stream(stream));
-        UnixStream::new(s, handle)
+        let stream = mio_uds::UnixStream::from_stream(stream)?;
+        let io = PollEvented::new_with_handle(stream, handle)?;
+
+        Ok(UnixStream { io })
     }
 
     /// Creates an unnamed pair of connected sockets.
@@ -61,17 +58,17 @@ impl UnixStream {
     /// This function will create a pair of interconnected unix sockets for
     /// communicating back and forth between one another. Each socket will be
     /// associated with the event loop whose handle is also provided.
-    pub fn pair(handle: &Handle) -> io::Result<(UnixStream, UnixStream)> {
+    pub fn pair() -> io::Result<(UnixStream, UnixStream)> {
         let (a, b) = try!(mio_uds::UnixStream::pair());
-        let a = try!(UnixStream::new(a, handle));
-        let b = try!(UnixStream::new(b, handle));
+        let a = UnixStream::new(a);
+        let b = UnixStream::new(b);
 
         Ok((a, b))
     }
 
-    fn new(stream: mio_uds::UnixStream, handle: &Handle) -> io::Result<UnixStream> {
-        let io = try!(PollEvented::new_with_handle(stream, handle));
-        Ok(UnixStream { io: io })
+    fn new(stream: mio_uds::UnixStream) -> UnixStream {
+        let io = PollEvented::new(stream);
+        UnixStream { io }
     }
 
     /// Test whether this socket is ready to be read or not.
