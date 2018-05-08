@@ -76,8 +76,7 @@ impl UnixListener {
         let (io, addr) = try_ready!(self.poll_accept_std());
 
         let io = mio_uds::UnixStream::from_stream(io)?;
-        let io = PollEvented::new(io);
-        Ok((UnixStream { io: io }, addr).into())
+        Ok((UnixStream::new(io), addr).into())
     }
 
     /// Attempt to accept a connection and create a new connected `UnixStream`

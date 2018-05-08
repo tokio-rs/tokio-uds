@@ -23,8 +23,7 @@ use std::path::Path;
 /// from a listener with `UnixListener::incoming`. Additionally, a pair of
 /// anonymous Unix sockets can be created with `UnixStream::pair`.
 pub struct UnixStream {
-    // TODO: This should be priv
-    pub(crate) io: PollEvented<mio_uds::UnixStream>,
+    io: PollEvented<mio_uds::UnixStream>,
 }
 
 impl UnixStream {
@@ -66,7 +65,7 @@ impl UnixStream {
         Ok((a, b))
     }
 
-    fn new(stream: mio_uds::UnixStream) -> UnixStream {
+    pub(crate) fn new(stream: mio_uds::UnixStream) -> UnixStream {
         let io = PollEvented::new(stream);
         UnixStream { io }
     }
