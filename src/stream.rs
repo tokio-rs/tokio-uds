@@ -4,7 +4,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_reactor::{Handle, PollEvented};
 
 use bytes::{Buf, BufMut};
-use futures::{Async, Poll};
+use futures::{Async, Future, Poll};
 use iovec::{self, IoVec};
 use libc;
 use mio::Ready;
@@ -26,18 +26,39 @@ pub struct UnixStream {
     io: PollEvented<mio_uds::UnixStream>,
 }
 
+/// Future returned by `UnixStream::connect` which will resolve to a
+/// `UnixStream` when the stream is connected.
+#[derive(Debug)]
+pub struct ConnectFuture {
+    inner: State,
+}
+
+#[derive(Debug)]
+enum State {
+    Waiting(UnixStream),
+    Error(io::Error),
+    Empty,
+}
+
 impl UnixStream {
     /// Connects to the socket named by `path`.
     ///
     /// This function will create a new unix socket and connect to the path
     /// specified, associating the returned stream with the default event loop's
     /// handle.
-    pub fn connect<P>(path: P) -> io::Result<UnixStream>
+    pub fn connect<P>(path: P) -> ConnectFuture
     where
         P: AsRef<Path>,
     {
-        let stream = mio_uds::UnixStream::connect(path)?;
-        Ok(UnixStream::new(stream))
+        let res = mio_uds::UnixStream::connect(path)
+            .map(UnixStream::new);
+
+        let inner = match res {
+            Ok(stream) => State::Waiting(stream),
+            Err(e) => State::Error(e),
+        };
+
+        ConnectFuture { inner }
     }
 
     /// Consumes a `UnixStream` in the standard library and returns a
@@ -226,6 +247,41 @@ impl fmt::Debug for UnixStream {
 impl AsRawFd for UnixStream {
     fn as_raw_fd(&self) -> RawFd {
         self.io.get_ref().as_raw_fd()
+    }
+}
+
+impl Future for ConnectFuture {
+    type Item = UnixStream;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<UnixStream, io::Error> {
+        use std::mem;
+
+        match self.inner {
+            State::Waiting(ref mut stream) => {
+                if let Async::NotReady = stream.io.poll_write_ready()? {
+                    return Ok(Async::NotReady)
+                }
+
+                if let Some(e) = try!(stream.io.get_ref().take_error()) {
+                    return Err(e)
+                }
+            }
+            State::Error(_) => {
+                let e = match mem::replace(&mut self.inner, State::Empty) {
+                    State::Error(e) => e,
+                    _ => unreachable!(),
+                };
+
+                return Err(e)
+            },
+            State::Empty => panic!("can't poll stream twice"),
+        }
+
+        match mem::replace(&mut self.inner, State::Empty) {
+            State::Waiting(stream) => Ok(Async::Ready(stream)),
+            _ => unreachable!(),
+        }
     }
 }
 

@@ -40,7 +40,7 @@ fn echo() {
             .map_err(|e| panic!("err={:?}", e))
     });
 
-    let client = UnixStream::connect(&sock_path).unwrap();
+    let client = rt.block_on(UnixStream::connect(&sock_path)).unwrap();
     let server = rt.block_on(rx).unwrap();
 
     // Write to the client
