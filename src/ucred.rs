@@ -89,17 +89,13 @@ pub mod impl_macos {
 #[cfg(not(target_os = "dragonfly"))]
 #[cfg(test)]
 mod test {
-    use tokio_reactor::Reactor;
     use UnixStream;
     use libc::geteuid;
     use libc::getegid;
 
     #[test]
     fn test_socket_pair() {
-        let core = Reactor::new().unwrap();
-        let handle = core.handle();
-
-        let (a, b) = UnixStream::pair(&handle).unwrap();
+        let (a, b) = UnixStream::pair().unwrap();
         let cred_a = a.peer_cred().unwrap();
         let cred_b = b.peer_cred().unwrap();
         assert_eq!(cred_a, cred_b);
